@@ -71,7 +71,7 @@ class EdenIssReplayer:
     # TelemetrySource protocol
     # ------------------------------------------------------------------
 
-    async def stream(self) -> AsyncIterator[TelemetryFrame]:  # type: ignore[override]
+    async def stream(self) -> AsyncIterator[TelemetryFrame]:
         """Yield TelemetryFrame objects in chronological order."""
         prev_ts: datetime | None = None
 

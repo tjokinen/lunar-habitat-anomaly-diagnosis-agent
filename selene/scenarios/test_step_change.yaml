@@ -1,0 +1,8 @@
+module_type: step_change
+name: test_step_change
+description: Trivial step-change anomaly for fit verification
+affected_sensors: [tcs/temp-ams_in]
+start_time: "2020-06-01T02:05:00+00:00"
+end_time: "2020-06-01T04:05:00+00:00"
+offset: 5.0
+unit: "degrees celsius"
