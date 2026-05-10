@@ -1,0 +1,39 @@
+# Operational sensor ranges for the EDEN ISS 2020 dataset.
+# Source: observed min/max across Jun 2020 reference week, padded to operational limits.
+# Used by ThresholdDetector; any sensor_id missing from sensor_overrides falls back
+# to its subsystem type default.  Values outside [min, max] trigger an AnomalyEvent.
+
+# Per-type defaults  (sensor_type -> [min, max])
+type_defaults:
+  CO2:   [400.0,  2500.0]   # ppm — 400 = atmospheric, 2500 = high-CO2 alarm
+  EC:    [0.5,    6.0]      # mS/cm — nutrient conductivity
+  H:     [15.0,   45.0]     # cm — tank level
+  P:     [-8.0,   5.0]      # bar — covers both TCS loop and NDS differential pressures
+  PAR:   [0.0,    400.0]    # umol/m^2/s — photosynthetically active radiation
+  PH:    [4.0,    9.5]      # pH — unitless
+  RH:    [10.0,   98.0]     # percent — relative humidity
+  T:     [-30.0,  50.0]     # degrees celsius — wide to cover both ambient and ext sensors
+  V:     [80.0,   220.0]    # litre — tank volume
+  VALVE: [0.0,    100.0]    # percent — fully closed to fully open
+  VPD:   [0.0,    60.0]     # mbar — vapour pressure deficit
+
+# Per-sensor overrides  (sensor_id -> [min, max])
+# Only needed where the type default is too wide or too narrow for a specific sensor.
+sensor_overrides:
+  # TCS pressures operate in a narrower band than NDS differential measurements
+  tcs/pressure-ams:  [0.2, 3.5]
+  tcs/pressure-free: [0.2, 3.5]
+  tcs/pressure-ics:  [0.2, 3.5]
+
+  # External ambient sensor can go below the general T floor in Antarctic winter
+  tcs/temp-ext_in:   [-40.0, 20.0]
+
+  # NDS differential pressures can be negative
+  nds/pressure-l1:   [-8.0, 3.5]
+  nds/pressure-l2:   [-8.0, 3.5]
+  nds/pressure-l3:   [-8.0, 3.5]
+  nds/pressure-l4:   [-8.0, 3.5]
+  nds/pressure-r1:   [-8.0, 3.5]
+  nds/pressure-r2:   [-8.0, 3.5]
+  nds/pressure-r3:   [-8.0, 3.5]
+  nds/pressure-r4:   [-8.0, 3.5]
