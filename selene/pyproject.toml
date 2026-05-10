@@ -35,6 +35,9 @@ python_version = "3.11"
 check_untyped_defs = true
 strict_optional = true
 
+[tool.poetry.scripts]
+selene-replay = "selene.cli.replay:main"
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
