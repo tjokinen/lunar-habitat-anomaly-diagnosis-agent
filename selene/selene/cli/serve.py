@@ -19,6 +19,13 @@ def _build_parser() -> argparse.ArgumentParser:
         default=Path("data/eden_iss/edeniss2020"),
         help="Path to EDEN ISS dataset root",
     )
+    p.add_argument(
+        "--speed",
+        type=float,
+        default=60.0,
+        help="Replay speed multiplier (60 = 1 wall-sec per simulated minute; "
+             "300 = 1 frame/sec at 5-min cadence; 600 = 2 frames/sec).",
+    )
     return p
 
 
@@ -27,10 +34,11 @@ def main() -> None:
 
     args = _build_parser().parse_args()
 
-    # Inject data path into the app module before starting so the lifespan
-    # picks it up.
+    # Inject data path / speed into the app module before starting so the
+    # lifespan picks them up.
     import selene.api.app as api_app
     api_app._DATA_PATH = args.data_path
+    api_app._SPEED_MULTIPLIER = args.speed
 
     uvicorn.run(
         "selene.api.app:app",

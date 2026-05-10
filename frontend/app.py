@@ -16,12 +16,21 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
+import sys
 from pathlib import Path
 from typing import AsyncGenerator
 
 import gradio as gr
 from gradio.themes import Base
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    stream=sys.stdout,
+)
+logger = logging.getLogger("selene.frontend")
 
 # ---------------------------------------------------------------------------
 # Backend connection settings (overridden by HF Space secrets at deploy time)
@@ -313,6 +322,7 @@ _DATA_PANEL_HTML = """
 <div class="selene-panel" id="selene-data-panel">
   <div class="clock-bar">
     <span class="lunar-time" id="lunar-clock">--:--:--</span>
+    <span class="speed-indicator" id="speed-indicator" title="Replay speed">—×</span>
     <span class="comm-window" id="comm-window-label">Next pass: —</span>
   </div>
   <table class="sensor-table" id="sensor-table">
@@ -369,24 +379,31 @@ _DATA_PANEL_JS = r"""
     return d.toISOString().substring(11, 19);
   }
 
+  // simNow() returns the current simulated time in ms (Unix epoch), derived
+  // from the last telemetry timestamp + wall-clock elapsed since then. This
+  // lets the comm-window cycle and indicators speed up with --speed N.
+  function simNowMs() {
+    if (!lastTelemetryTs) return null;
+    return new Date(lastTelemetryTs).getTime() + (Date.now() - lastWallMs);
+  }
+
   function tickClock() {
     const clockEl = document.getElementById('lunar-clock');
     if (!clockEl) return;
-    if (lastTelemetryTs) {
-      const elapsed = Date.now() - lastWallMs;
-      const d = new Date(new Date(lastTelemetryTs).getTime() + elapsed);
-      clockEl.textContent = fmtTime(d);
-    }
+    const sim = simNowMs();
+    if (sim !== null) clockEl.textContent = fmtTime(new Date(sim));
   }
   setInterval(tickClock, 1000);
 
-  // ── Comm window (simple: cycles every 2h, 10-min window) ──────────────────
+  // ── Comm window — driven by simulated time so it tracks --speed ──────────
+  // Cycles every 2 simulated hours; 10-minute open window per cycle.
   function updateCommWindow() {
     const el = document.getElementById('comm-window-label');
     if (!el) return;
-    const now = Date.now();
+    const sim = simNowMs();
+    if (sim === null) { el.textContent = 'Next pass: —'; return; }
     const CYCLE_MS = 2 * 3600 * 1000, WINDOW_MS = 10 * 60 * 1000;
-    const phase = now % CYCLE_MS;
+    const phase = ((sim % CYCLE_MS) + CYCLE_MS) % CYCLE_MS;  // safe for any epoch
     if (phase < WINDOW_MS) {
       const rem = Math.ceil((WINDOW_MS - phase) / 60000);
       el.textContent = 'Comm window open — ' + rem + 'm left';
@@ -398,8 +415,15 @@ _DATA_PANEL_JS = r"""
       el.style.color = '';
     }
   }
-  setInterval(updateCommWindow, 15000);
+  setInterval(updateCommWindow, 1000);
   updateCommWindow();
+
+  // ── Speed indicator (set by Gradio via window.__seleneSetSpeed) ──────────
+  window.__seleneSetSpeed = function(mult) {
+    const el = document.getElementById('speed-indicator');
+    if (!el) return;
+    el.textContent = (mult === null || mult === undefined) ? '∞×' : (mult + '×');
+  };
 
   // ── Sparkline ─────────────────────────────────────────────────────────────
   function drawSparkline(canvas, values) {
@@ -495,7 +519,10 @@ _DATA_PANEL_JS = r"""
     const readings = frame.readings || {};
     SENSORS.forEach(s => {
       const r = readings[s.id];
-      if (r !== undefined && r !== null) updateRow(s.id, r);
+      if (r === undefined || r === null) return;
+      // Wire format is the full SensorReading object; pull the numeric value.
+      const v = (typeof r === 'object') ? r.value : r;
+      if (v !== undefined && v !== null) updateRow(s.id, v);
     });
   });
 
@@ -791,31 +818,49 @@ async def _pump(
     import websockets
 
     url = f"{BACKEND_WS_URL}{endpoint}"
+    msg_count = 0
     while True:
         try:
+            logger.info("WS pump connecting: %s", url)
             async with websockets.connect(url) as ws:
+                logger.info("WS pump connected: %s", url)
                 async for raw in ws:
                     try:
                         data = json.loads(raw)
                     except json.JSONDecodeError:
                         continue
+                    msg_count += 1
+                    if msg_count <= 3 or msg_count % 50 == 0:
+                        logger.info("WS pump %s msg #%d", endpoint, msg_count)
                     await queue.put({"type": event_type, payload_key: data})
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("WS pump %s error: %s", endpoint, exc)
         await asyncio.sleep(_RECONNECT_DELAY_SECS)
 
 
-async def _event_stream() -> AsyncGenerator[dict, None]:
-    """Merge telemetry + agent_event WS streams; yield dicts into event_state."""
+async def _event_stream() -> AsyncGenerator[str, None]:
+    """Merge telemetry + agent_event WS streams.
+
+    Yields JSON strings to a hidden gr.Textbox whose value the browser-side
+    MutationObserver picks up.  We append a monotonic suffix in a separate
+    field so two consecutive identical payloads still mutate the textarea.
+    """
+    logger.info("event_stream started; BACKEND_URL=%s BACKEND_WS_URL=%s",
+                BACKEND_URL, BACKEND_WS_URL)
     queue: asyncio.Queue = asyncio.Queue()
     tasks = [
         asyncio.create_task(_pump("/telemetry",    "telemetry",    "frame", queue)),
         asyncio.create_task(_pump("/agent_events", "agent_event",  "event", queue)),
     ]
+    yielded = 0
     try:
         while True:
             item = await queue.get()
-            yield item
+            yielded += 1
+            item["_seq"] = yielded
+            if yielded <= 3 or yielded % 50 == 0:
+                logger.info("event_stream yield #%d type=%s", yielded, item.get("type"))
+            yield json.dumps(item)
     finally:
         for t in tasks:
             t.cancel()
@@ -825,22 +870,58 @@ async def _event_stream() -> AsyncGenerator[dict, None]:
 # custom DOM events dispatched on window.
 _OBSERVER_JS = """
 () => {
+  let mutCount = 0, dispatchCount = 0, parseFails = 0;
+  let lastSeq = -1;
+  window.__seleneDebug = function() {
+    console.log('[selene] mutations=' + mutCount +
+                ' dispatched=' + dispatchCount +
+                ' parseFails=' + parseFails +
+                ' lastSeq=' + lastSeq);
+  };
+
+  function dispatch(raw) {
+    try {
+      const data = JSON.parse(raw || '{}');
+      if (!data || !data.type) return;
+      if (data._seq !== undefined) lastSeq = data._seq;
+      if (data.type === 'telemetry') {
+        window.dispatchEvent(new CustomEvent('selene:telemetry', { detail: data.frame }));
+        dispatchCount++;
+      } else if (data.type === 'agent_event') {
+        window.dispatchEvent(new CustomEvent('selene:agent_event', { detail: data.event }));
+        dispatchCount++;
+      }
+    } catch(_) { parseFails++; }
+  }
+
   function attachSeleneObserver() {
-    const el = document.querySelector('#event-state');
-    if (!el) { setTimeout(attachSeleneObserver, 200); return; }
-    const observer = new MutationObserver(() => {
-      try {
-        const raw = el.querySelector('div') ? el.querySelector('div').textContent : el.textContent;
-        const data = JSON.parse(raw || '{}');
-        if (!data || !data.type) return;
-        if (data.type === 'telemetry') {
-          window.dispatchEvent(new CustomEvent('selene:telemetry', { detail: data.frame }));
-        } else if (data.type === 'agent_event') {
-          window.dispatchEvent(new CustomEvent('selene:agent_event', { detail: data.event }));
-        }
-      } catch(_) {}
+    const root = document.querySelector('#event-state');
+    if (!root) { setTimeout(attachSeleneObserver, 200); return; }
+    const ta = root.querySelector('textarea') || root.querySelector('input');
+    if (!ta) { setTimeout(attachSeleneObserver, 200); return; }
+    console.log('[selene] observer attached to', ta.tagName, '#event-state');
+
+    // 1. Poll the textarea value — most robust across Gradio versions, since
+    //    Gradio sets .value programmatically (no native input event fires).
+    let lastVal = '';
+    setInterval(() => {
+      if (ta.value !== lastVal) {
+        lastVal = ta.value;
+        mutCount++;
+        dispatch(ta.value);
+      }
+    }, 100);
+
+    // 2. Belt-and-suspenders: also watch for DOM mutations (in case Gradio
+    //    re-renders the textarea node).
+    const obs = new MutationObserver(() => {
+      if (ta.value !== lastVal) {
+        lastVal = ta.value;
+        mutCount++;
+        dispatch(ta.value);
+      }
     });
-    observer.observe(el, { childList: true, subtree: true, characterData: true });
+    obs.observe(root, { childList: true, subtree: true, characterData: true, attributes: true });
   }
   attachSeleneObserver();
 }
@@ -872,6 +953,19 @@ with gr.Blocks(title="Selene") as demo:
                 )
                 start_btn = gr.Button("▶ Start", variant="primary", scale=1)
                 reset_btn = gr.Button("↺ Reset", variant="secondary", scale=1)
+                speed_dropdown = gr.Dropdown(
+                    choices=[
+                        ("60×",   60.0),
+                        ("300×",  300.0),
+                        ("600×",  600.0),
+                        ("1800×", 1800.0),
+                        ("3600×", 3600.0),
+                    ],
+                    value=60.0,
+                    label="Speed",
+                    scale=1,
+                    interactive=True,
+                )
 
             scenario_desc = gr.Markdown(
                 value="",
@@ -890,9 +984,21 @@ with gr.Blocks(title="Selene") as demo:
                 elem_id="investigation-panel",
             )
 
-    # Hidden JSON component — the WebSocket pump writes here;
-    # browser-side JS watches for mutations and dispatches custom events.
-    event_state = gr.JSON(value=None, visible=False, elem_id="event-state")
+    # Hidden Textbox — the WebSocket pump writes a JSON string here;
+    # browser-side MutationObserver watches the textarea for changes and
+    # dispatches custom events.  We use Textbox rather than gr.JSON because
+    # gr.JSON's tree-viewer component does not produce reliable DOM
+    # mutations when streamed via async-generator yields, and `visible=False`
+    # may strip the element from the DOM entirely in newer Gradio versions.
+    event_state = gr.Textbox(
+        value="",
+        elem_id="event-state",
+        elem_classes=["selene-hidden"],
+        show_label=False,
+        lines=1,
+        max_lines=1,
+        interactive=False,
+    )
 
     # scenario_id → {name, description} — filled on load, read by desc handler
     _scenario_meta: dict[str, dict] = {}
@@ -979,6 +1085,45 @@ with gr.Blocks(title="Selene") as demo:
         fn=_reset_scenario,
         inputs=[],
         outputs=[status_label],
+    )
+
+    # ── Replay speed: load current value + push UI changes to backend ──────
+    async def _load_speed() -> float:
+        import httpx
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                resp = await client.get(f"{BACKEND_URL}/replay/speed")
+                resp.raise_for_status()
+                return resp.json().get("multiplier") or 60.0
+        except Exception:
+            return 60.0
+
+    async def _set_speed(multiplier: float | None) -> None:
+        import httpx
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                await client.post(
+                    f"{BACKEND_URL}/replay/speed",
+                    json={"multiplier": multiplier},
+                )
+        except Exception as exc:
+            logger.warning("set_speed failed: %s", exc)
+
+    demo.load(fn=_load_speed, inputs=[], outputs=[speed_dropdown])
+
+    # Mirror the dropdown into the on-screen indicator via window.__seleneSetSpeed.
+    speed_dropdown.change(
+        fn=_set_speed,
+        inputs=[speed_dropdown],
+        outputs=[],
+        js="(v) => { if (window.__seleneSetSpeed) window.__seleneSetSpeed(v); return v; }",
+    )
+    # Also push the loaded value into the indicator on first load.
+    demo.load(
+        fn=None,
+        inputs=[speed_dropdown],
+        outputs=[],
+        js="(v) => { if (window.__seleneSetSpeed) window.__seleneSetSpeed(v); return v; }",
     )
 
 

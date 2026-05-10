@@ -93,6 +93,18 @@ class EdenIssReplayer:
     def get_metadata(self) -> SensorMetadata:
         return self._metadata
 
+    def set_speed(self, multiplier: float | None) -> None:
+        """Update replay speed live.
+
+        ``stream()`` reads the multiplier on every frame, so the new value
+        takes effect for the next inter-frame sleep.  Pass ``None`` for
+        as-fast-as-possible.
+        """
+        self._speed_multiplier = multiplier
+
+    def get_speed(self) -> float | None:
+        return self._speed_multiplier
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------

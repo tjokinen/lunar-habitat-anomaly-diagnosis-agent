@@ -43,6 +43,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _DATA_PATH: Path = Path("data/eden_iss/edeniss2020")
+_SPEED_MULTIPLIER: float = 60.0
 
 _scenario_registry: dict[str, Any] = {}   # scenario_id -> AnomalyModule
 _pipeline_task: asyncio.Task | None = None
@@ -157,7 +158,7 @@ async def _start_pipeline(scenario_id: str | None = None) -> None:
         except (asyncio.CancelledError, Exception):
             pass
     _pipeline_task = asyncio.create_task(
-        _run_pipeline_task(_DATA_PATH, scenario_id)
+        _run_pipeline_task(_DATA_PATH, scenario_id, _SPEED_MULTIPLIER)
     )
 
 
@@ -211,6 +212,10 @@ class ScenarioStartRequest(BaseModel):
     scenario_id: str
 
 
+class SpeedRequest(BaseModel):
+    multiplier: float | None  # None = as-fast-as-possible
+
+
 @app.get("/sensors")
 async def get_sensors():
     if _replayer is None:
@@ -261,6 +266,27 @@ async def start_scenario(req: ScenarioStartRequest):
 async def reset_scenario():
     await _start_pipeline(scenario_id=None)
     return {"status": "reset"}
+
+
+@app.get("/replay/speed")
+async def get_replay_speed():
+    """Current replay speed multiplier (default applied to fresh pipelines)."""
+    return {
+        "multiplier": (
+            _replayer.get_speed() if _replayer is not None else _SPEED_MULTIPLIER
+        ),
+        "default": _SPEED_MULTIPLIER,
+    }
+
+
+@app.post("/replay/speed")
+async def set_replay_speed(req: SpeedRequest):
+    """Update replay speed live and as the default for future pipelines."""
+    global _SPEED_MULTIPLIER
+    _SPEED_MULTIPLIER = req.multiplier if req.multiplier is not None else 60.0
+    if _replayer is not None:
+        _replayer.set_speed(req.multiplier)
+    return {"status": "ok", "multiplier": req.multiplier}
 
 
 # ---------------------------------------------------------------------------
