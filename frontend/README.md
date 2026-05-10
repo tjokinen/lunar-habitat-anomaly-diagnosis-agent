@@ -1,5 +1,5 @@
 ---
-title: Selene — Lunar Habitat Anomaly Diagnosis
+title: LHADA — Lunar Habitat Anomaly Diagnosis
 emoji: 🌑
 colorFrom: gray
 colorTo: blue
@@ -15,7 +15,7 @@ tags:
   - anomaly-detection
 ---
 
-# Selene — Lunar Habitat Anomaly Diagnosis
+# LHADA — Lunar Habitat Anomaly Diagnosis
 
 On-prem reasoning agent for life-support telemetry in latency-bounded environments.
 
@@ -23,7 +23,7 @@ Backend runs on AMD MI300X via vLLM. See the GitHub repo for the full stack.
 
 ## What it does
 
-Selene replays real telemetry from the [EDEN ISS 2020 dataset](https://zenodo.org/records/11485183)
+LHADA replays real telemetry from the [EDEN ISS 2020 dataset](https://zenodo.org/records/11485183)
 — DLR's Antarctic closed-loop greenhouse, the closest public dataset to a space habitat life-support
 system — and runs an LLM-driven diagnostic agent against it.
 

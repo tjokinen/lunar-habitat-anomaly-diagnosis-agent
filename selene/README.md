@@ -1,10 +1,10 @@
-# Selene
+# LHADA
 
 A lunar habitat anomaly diagnosis agent that integrates EDEN ISS data for intelligent fault detection and reasoning.
 
 ## Overview
 
-Selene is an AI-powered diagnostic system designed to:
+LHADA is an AI-powered diagnostic system designed to:
 - Ingest and replay EDEN ISS telemetry data
 - Detect anomalies using multiple detection methods (DAMP, MDI, threshold-based)
 - Reason about failures using a knowledge base of failure modes
