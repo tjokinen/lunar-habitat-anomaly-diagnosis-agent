@@ -21,6 +21,10 @@ Selene is an AI-powered diagnostic system designed to:
 - **api**: FastAPI REST and WebSocket endpoints
 - **cli**: Command-line interface for local diagnosis
 
+## Data
+
+Telemetry comes from the EDEN ISS 2020 dataset (Zenodo record `10.5281/zenodo.11485183`). See [`docs/eden_iss_format.md`](docs/eden_iss_format.md) for the format reference, sensor inventory, sampling cadence, and preprocessing notes that the replayer relies on.
+
 ## Setup
 
 ```bash
