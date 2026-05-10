@@ -250,8 +250,6 @@ structured diagnosis with citations, end-to-end on a single AMD MI300X.
 - NASA NTRS 20220003097 — *Coolant Leak from ISS External Active Thermal
   Control System (EATCS) — An Examination of Most Probable.* Cowan et al.,
   2022. <https://ntrs.nasa.gov/citations/20220003097>
-- vLLM ROCm —
-  <https://docs.vllm.ai/en/latest/getting_started/amd-installation.html>
 - DAMP / Matrix Profile — <https://stumpy.readthedocs.io>
 
 ---
