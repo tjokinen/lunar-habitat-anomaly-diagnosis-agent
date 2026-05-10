@@ -183,7 +183,7 @@ class ReasoningAgent:
         base_url: str | None = None,
         api_key: str | None = None,
         model: str | None = None,
-        max_iterations: int = 10,
+        max_iterations: int = 15,
         client: LLMClient | None = None,
     ) -> None:
         self.store = store
@@ -238,7 +238,7 @@ class ReasoningAgent:
             messages.append({"role": "assistant", "content": content})
 
             try:
-                diagnosis = Diagnosis.model_validate_json(content)
+                diagnosis = Diagnosis.model_validate_json(_strip_markdown(content))
             except ValidationError as e:
                 messages.append(
                     {
@@ -463,6 +463,26 @@ def _now() -> datetime:
     """Wall-clock UTC. Trace event timestamps are not part of the deterministic
     contract — only tool outputs are."""
     return datetime.now(timezone.utc)
+
+
+def _strip_markdown(text: str) -> str:
+    """Remove markdown code fences that LLMs sometimes wrap JSON in.
+
+    Handles:
+      ```json\\n{...}\\n```
+      ```\\n{...}\\n```
+      {... (already bare JSON — returned as-is)
+    """
+    s = text.strip()
+    if s.startswith("```"):
+        lines = s.splitlines()
+        # drop the opening fence line (```json or ```)
+        inner = lines[1:]
+        # drop the closing ``` if present
+        if inner and inner[-1].strip() == "```":
+            inner = inner[:-1]
+        s = "\n".join(inner).strip()
+    return s
 
 
 def _assistant_message_with_tool_calls(response: LLMResponse) -> dict[str, Any]:

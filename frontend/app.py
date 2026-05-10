@@ -708,7 +708,7 @@ _INVESTIGATION_JS = r"""
   function headerHTML(run) {
     const trig = run.trigger || {};
     const sensors = (trig.affected_sensors || []).join(', ') || '—';
-    const score   = trig.score != null ? (trig.score * 100).toFixed(0) + '%' : '';
+    const score   = trig.score != null ? trig.score.toFixed(2) : '';
     const det     = trig.detector_name || '';
     const ts      = fmtClock(run.startTs);
 

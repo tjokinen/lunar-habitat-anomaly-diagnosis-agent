@@ -194,36 +194,71 @@ INVESTIGATIVE STYLE
 (slow drift / step change / oscillation / threshold breach) and direction.
 3. Test couplings between sensors that should move together. A sensor moving alone \
 is more diagnostic than one moving in concert.
-4. Once you have 2–4 characterized signatures, call lookup_failure_mode and \
+4. Once you have 2-4 characterized signatures, call lookup_failure_mode and \
 weigh the top hits against your evidence. The KB returns ranked candidates; you \
 choose which to commit to.
+
+SENSOR PATTERN VOCABULARY FOR lookup_failure_mode
+
+CRITICAL: the symptoms you pass to lookup_failure_mode use ABSTRACT PATTERN LABELS, \
+not raw sensor IDs. Passing a sensor ID like "tcs/temp-ams_in" as sensor_pattern will \
+return score 0 because no KB entry uses sensor paths. Use the following mapping:
+
+  tcs/pressure-*         -> thermal_loop_pressure
+  tcs/temp-*             -> thermal_loop_temperature
+  tcs/valve-*            -> thermal_loop_valve_position
+  ams-*/co2-* or co2-*   -> cabin_co2_concentration
+  ams-*/rh-*  or rh-*    -> cabin_relative_humidity
+  ams-*/temp-* or temp-* (AMS context) -> cabin_temperature
+  nds/pressure-*         -> nutrient_loop_pressure
+  nds/ec-*               -> nutrient_electrical_conductivity
+  nds/ph-*               -> nutrient_ph
+  nds/level-* or nds/volume-* -> nutrient_tank_level
+  ics/* (lighting)       -> illumination_output
+
+Always prefer using 2-3 abstract symptoms that represent what you observed; more \
+specific is better than vaguer.
 
 TERMINATION
 
 When you have enough evidence, respond with a single JSON object that matches \
 the Diagnosis schema below. Do NOT call any tools in that final turn — a turn \
 with no tool calls is interpreted as your final answer. Your message content must \
-be valid JSON, nothing else (no prose, no markdown fences).
+be valid JSON and nothing else — no prose before or after, no markdown fences, \
+no triple backticks.
 
 DIAGNOSIS SCHEMA (JSON Schema):
 
 {diagnosis_schema_json}
 
-The ``matched_failure_modes`` field MUST contain only KB entry IDs that the \
-lookup_failure_mode tool returned. ``citations`` should be drawn from those entries' \
-citation lists. ``confidence`` reflects your subjective certainty in [0, 1] — be \
-honest, not optimistic.
+Rules for the final JSON:
+- matched_failure_modes: list the exact "id" strings returned by lookup_failure_mode \
+(e.g. "iss_p1_eatcs_leak_2011"). If the KB returned no useful matches, use [].
+- citations: copy the citation objects from the matched KB entries. Each citation \
+needs exactly these fields: source_type, identifier, title (url is optional). \
+If matched_failure_modes is empty, citations may be [].
+- confidence: a float in [0.0, 1.0]. Do not exceed 1.0.
+- supporting_evidence and recommended_actions must be non-empty lists of strings.
 
-WORKED EXAMPLE (illustrative, not a script)
+WORKED EXAMPLE (complete — follow this structure exactly)
 
-User: anomaly on tcs/loop-press-1, slow_drift score 3.4, t=12:00 UTC.
+User: anomaly on tcs/pressure-ams, slow_drift, t=02:15 UTC.
 
-Turn 1: call fetch_subsystem_state(subsystem="thermal_control_system").
-Turn 2: call query_sensor_history(sensor_id="tcs/loop-press-1", start=..., end=...).
-Turn 3: call correlate_signals(sensor_ids=["tcs/loop-press-1", "tcs/valve-pos-1"], \
-window_seconds=3600).
-Turn 4: call lookup_failure_mode with two characterized symptoms.
-Turn 5 (final, no tool calls): emit JSON Diagnosis with primary_hypothesis, \
-matched_failure_modes from the KB hit, supporting_evidence citing the actual values \
-seen, and citations from the KB entry.
+Turn 1 — tool call:
+  fetch_subsystem_state(subsystem="TCS")
+
+Turn 2 — tool call:
+  query_sensor_history(sensor_id="tcs/pressure-ams", start="2020-06-01T01:15:00Z", end="2020-06-01T02:15:00Z")
+
+Turn 3 — tool call:
+  correlate_signals(sensor_ids=["tcs/pressure-ams", "tcs/temp-ams_in", "tcs/valve-ams"], window_seconds=3600)
+
+Turn 4 — tool call:
+  lookup_failure_mode(symptoms=[
+    {{"sensor_pattern": "thermal_loop_pressure", "pattern_type": "slow_drift", "direction": "decreasing", "time_scale": "hours", "correlation_with": ["thermal_loop_temperature"]}},
+    {{"sensor_pattern": "thermal_loop_temperature", "pattern_type": "slow_drift", "direction": "increasing", "time_scale": "hours", "correlation_with": []}}
+  ])
+
+Turn 5 — FINAL (no tool calls, raw JSON only):
+{{"primary_hypothesis": "Thermal loop coolant leak — slow pressure decay with compensating temperature rise consistent with ISS P1 EATCS leak signature", "confidence": 0.72, "matched_failure_modes": ["iss_p1_eatcs_leak_2011"], "supporting_evidence": ["tcs/pressure-ams decaying from 1.30 to 1.29 bar over 75 min (0.8% loss, accelerating)", "tcs/temp-ams_in rising +0.3 C after 30-min lag consistent with reduced cooling capacity", "pressure-temperature anti-correlation r=-0.81 confirms coupled thermal response"], "differential_hypotheses": ["sensor_calibration_drift", "flow_control_valve_stuck_open"], "recommended_actions": ["Monitor tcs/pressure-ams trend rate every 15 min; if loss exceeds 2%/h escalate to EVA prep", "Cross-check tcs/pressure-free and tcs/pressure-ics for system-wide vs loop-local pressure event", "Reconfigure loop interconnects to cross-feed from unaffected branch"], "citations": [{{"source_type": "NTRS", "identifier": "20190029027", "title": "The International Space Station (ISS) Port 1 (P1) External Active Thermal Control System (EATCS) Ammonia Leak", "url": "https://ntrs.nasa.gov/citations/20190029027"}}]}}
 """
