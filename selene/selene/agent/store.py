@@ -17,6 +17,26 @@ from datetime import datetime, timedelta, timezone
 from selene.agent.types import SubsystemSnapshot, TimeSeries, TimeSeriesPoint
 from selene.core.interfaces import SensorMetadata, SensorReading, TelemetryFrame
 
+# Alias map: long-form subsystem names (advertised in the LLM tool schema /
+# system prompt) → short codes that actually appear in EDEN ISS metadata.
+# Both directions are accepted by ``subsystem_state`` so the agent can pass
+# either form. Match is case-insensitive on the key.
+_SUBSYSTEM_ALIASES: dict[str, str] = {
+    "thermal_control_system":      "tcs",
+    "tcs":                         "tcs",
+    "atmosphere_management_system": "ams",
+    "ams":                         "ams",
+    "nutrient_delivery_system":    "nds",
+    "nds":                         "nds",
+    "illumination_control_system": "ics",
+    "ics":                         "ics",
+}
+
+
+def _normalise_subsystem(name: str) -> str:
+    """Map either form (long or short, any case) to a canonical lowercase code."""
+    return _SUBSYSTEM_ALIASES.get(name.lower(), name.lower())
+
 
 class TelemetryStore:
     """Bounded ring buffer of recent ``SensorReading``s, keyed by sensor_id.
@@ -69,12 +89,17 @@ class TelemetryStore:
         """Latest reading per sensor in the requested subsystem.
 
         Subsystem membership is read from ``metadata.sensors[sensor_id]["subsystem"]``.
-        Sensors with no data yet are omitted from ``readings`` and ``units``.
+        The lookup tolerates either the long-form names advertised in the LLM
+        tool schema (``thermal_control_system``) or the short codes that EDEN
+        ISS actually uses (``TCS``) — both sides are normalised through the
+        alias map. Sensors with no data yet are omitted from ``readings`` and
+        ``units``.
         """
+        target = _normalise_subsystem(subsystem)
         subsystem_sensors = [
             sid
             for sid, info in metadata.sensors.items()
-            if info.get("subsystem") == subsystem
+            if _normalise_subsystem(str(info.get("subsystem", ""))) == target
         ]
         latest = self.latest(subsystem_sensors)
 

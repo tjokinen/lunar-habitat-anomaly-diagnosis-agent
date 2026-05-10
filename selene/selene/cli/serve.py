@@ -30,9 +30,18 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    import logging
     import uvicorn
 
     args = _build_parser().parse_args()
+
+    # Make sure selene.* INFO-level logs (LLM URL, completion latency,
+    # investigation failures) reach the console under uvicorn.
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
+    logging.getLogger("selene").setLevel(logging.INFO)
 
     # Inject data path / speed into the app module before starting so the
     # lifespan picks them up.

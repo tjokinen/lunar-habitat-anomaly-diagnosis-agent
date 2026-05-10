@@ -17,13 +17,17 @@ step 2.5.
 from __future__ import annotations
 
 import json
+import logging
 import os
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable, Protocol
 from uuid import uuid4
 
 from pydantic import ValidationError
+
+logger = logging.getLogger(__name__)
 
 from selene.agent.prompts import TOOL_SCHEMAS, build_system_prompt
 from selene.agent.store import TelemetryStore
@@ -88,8 +92,10 @@ class _OpenAICompatClient:
         # Imported lazily so unit tests don't need openai installed in the env.
         from openai import AsyncOpenAI
 
+        self._base_url = base_url
         self._client = AsyncOpenAI(base_url=base_url, api_key=api_key)
         self._model = model
+        logger.info("LLM client → %s  model=%s", base_url, model)
 
     async def complete(
         self,
@@ -107,8 +113,23 @@ class _OpenAICompatClient:
         if force_json:
             kwargs["response_format"] = {"type": "json_object"}
 
-        response = await self._client.chat.completions.create(**kwargs)
+        t0 = time.monotonic()
+        try:
+            response = await self._client.chat.completions.create(**kwargs)
+        except Exception as exc:
+            logger.warning(
+                "LLM completion FAILED  url=%s model=%s err=%s",
+                self._base_url, self._model, exc,
+            )
+            raise
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
         message = response.choices[0].message
+        n_tool_calls = len(message.tool_calls or [])
+        logger.info(
+            "LLM completion ok  url=%s model=%s elapsed=%dms tool_calls=%d content=%s",
+            self._base_url, self._model, elapsed_ms, n_tool_calls,
+            "yes" if message.content else "no",
+        )
         tool_calls: list[LLMToolCall] = []
         for tc in message.tool_calls or []:
             try:
@@ -288,6 +309,7 @@ class ReasoningAgent:
         user_payload = {
             "trigger": trigger.model_dump(mode="json"),
             "affected_subsystem": affected_subsystem,
+            "available_subsystems": list(self.metadata.subsystems),
             "subsystem_snapshot": snapshot_blob,
         }
         return [
@@ -296,7 +318,10 @@ class ReasoningAgent:
                 "role": "user",
                 "content": (
                     "An anomaly detector has fired. Investigate using the tools "
-                    "and produce a Diagnosis. Trigger and current subsystem state:\n"
+                    "and produce a Diagnosis. When calling fetch_subsystem_state, "
+                    "use a subsystem code from `available_subsystems` (e.g. "
+                    f"{', '.join(repr(s) for s in self.metadata.subsystems[:4])}). "
+                    "Trigger and current subsystem state:\n"
                     f"{json.dumps(user_payload, indent=2)}"
                 ),
             },
