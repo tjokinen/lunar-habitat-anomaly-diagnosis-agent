@@ -14,8 +14,11 @@ the layout and CSS so that the page loads with empty panels.
 
 from __future__ import annotations
 
+import asyncio
+import json
 import os
 from pathlib import Path
+from typing import AsyncGenerator
 
 import gradio as gr
 from gradio.themes import Base
@@ -26,6 +29,8 @@ from gradio.themes import Base
 
 BACKEND_URL    = os.environ.get("BACKEND_URL",    "http://localhost:8000")
 BACKEND_WS_URL = os.environ.get("BACKEND_WS_URL", "ws://localhost:8000")
+
+_RECONNECT_DELAY_SECS = 3.0
 
 # ---------------------------------------------------------------------------
 # CSS
@@ -67,6 +72,75 @@ _INVESTIGATION_PLACEHOLDER = """
   </div>
   <div id="trace-active" style="display:none;"></div>
 </div>
+"""
+
+# ---------------------------------------------------------------------------
+# WebSocket → event_state pump
+# ---------------------------------------------------------------------------
+
+async def _pump(
+    endpoint: str,
+    event_type: str,
+    payload_key: str,
+    queue: asyncio.Queue,
+) -> None:
+    """Connect to a backend WS endpoint and push messages onto queue forever."""
+    import websockets
+
+    url = f"{BACKEND_WS_URL}{endpoint}"
+    while True:
+        try:
+            async with websockets.connect(url) as ws:
+                async for raw in ws:
+                    try:
+                        data = json.loads(raw)
+                    except json.JSONDecodeError:
+                        continue
+                    await queue.put({"type": event_type, payload_key: data})
+        except Exception:
+            pass
+        await asyncio.sleep(_RECONNECT_DELAY_SECS)
+
+
+async def _event_stream() -> AsyncGenerator[dict, None]:
+    """Merge telemetry + agent_event WS streams; yield dicts into event_state."""
+    queue: asyncio.Queue = asyncio.Queue()
+    tasks = [
+        asyncio.create_task(_pump("/telemetry",    "telemetry",    "frame", queue)),
+        asyncio.create_task(_pump("/agent_events", "agent_event",  "event", queue)),
+    ]
+    try:
+        while True:
+            item = await queue.get()
+            yield item
+    finally:
+        for t in tasks:
+            t.cancel()
+
+
+# Browser-side MutationObserver that converts event_state mutations into
+# custom DOM events dispatched on window.
+_OBSERVER_JS = """
+() => {
+  function attachSeleneObserver() {
+    const el = document.querySelector('#event-state');
+    if (!el) { setTimeout(attachSeleneObserver, 200); return; }
+    const observer = new MutationObserver(() => {
+      try {
+        const raw = el.querySelector('div') ? el.querySelector('div').textContent : el.textContent;
+        const data = JSON.parse(raw || '{}');
+        if (!data || !data.type) return;
+        if (data.type === 'telemetry') {
+          window.dispatchEvent(new CustomEvent('selene:telemetry', { detail: data.frame }));
+        } else if (data.type === 'agent_event') {
+          window.dispatchEvent(new CustomEvent('selene:agent_event', { detail: data.event }));
+        }
+      } catch(_) {}
+    });
+    observer.observe(el, { childList: true, subtree: true, characterData: true });
+  }
+  attachSeleneObserver();
+}
 """
 
 # ---------------------------------------------------------------------------
@@ -128,6 +202,12 @@ with gr.Blocks(title="Selene") as demo:
 
     demo.load(fn=_load_scenarios, inputs=[], outputs=[scenario_dropdown])
 
+    # ── Attach MutationObserver on page load ───────────────────────────────
+    demo.load(fn=None, js=_OBSERVER_JS)
+
+    # ── WebSocket event pump — streams backend events into event_state ─────
+    demo.load(fn=_event_stream, outputs=[event_state])
+
     # ── Scenario start / reset ─────────────────────────────────────────────
     async def _start_scenario(scenario_id: str | None) -> str:
         if not scenario_id:
@@ -165,10 +245,6 @@ with gr.Blocks(title="Selene") as demo:
         outputs=[status_label],
     )
 
-    # ── WebSocket event pump (steps 3.4–3.7 will extend this) ──────────────
-    # Placeholder — the actual pump is wired in step 3.4.
-    # The event_state JSON component is already in the DOM so the JS in
-    # steps 3.5–3.7 can subscribe to it immediately.
 
 
 # ---------------------------------------------------------------------------
