@@ -16,6 +16,7 @@ fastapi = "*"
 uvicorn = "*"
 websockets = "*"
 stumpy = "*"
+openai = "^2.36.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "*"
@@ -26,6 +27,9 @@ mypy = "*"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+    "slow: tests that hit external services (e.g. live vLLM endpoints)",
+]
 
 [tool.ruff]
 line-length = 100
