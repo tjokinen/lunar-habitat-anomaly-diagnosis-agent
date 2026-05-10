@@ -862,7 +862,7 @@ with gr.Blocks(title="Selene") as demo:
                 elem_id="habitat-scene",
             )
 
-            # Scenario controls (Gradio components for reliable event wiring)
+            # Scenario controls
             with gr.Row(elem_classes=["controls-row"]):
                 scenario_dropdown = gr.Dropdown(
                     choices=[],
@@ -873,6 +873,10 @@ with gr.Blocks(title="Selene") as demo:
                 start_btn = gr.Button("▶ Start", variant="primary", scale=1)
                 reset_btn = gr.Button("↺ Reset", variant="secondary", scale=1)
 
+            scenario_desc = gr.Markdown(
+                value="",
+                elem_id="scenario-desc",
+            )
             status_label = gr.Markdown("**Status:** Idle")
 
         # Right column — live data panel + investigation trace
@@ -890,20 +894,38 @@ with gr.Blocks(title="Selene") as demo:
     # browser-side JS watches for mutations and dispatches custom events.
     event_state = gr.JSON(value=None, visible=False, elem_id="event-state")
 
+    # scenario_id → {name, description} — filled on load, read by desc handler
+    _scenario_meta: dict[str, dict] = {}
+
     # ── Populate scenario dropdown on load ─────────────────────────────────
-    async def _load_scenarios() -> gr.Dropdown:
+    async def _load_scenarios() -> tuple[gr.Dropdown, str]:
         import httpx
         try:
             async with httpx.AsyncClient(timeout=3.0) as client:
                 resp = await client.get(f"{BACKEND_URL}/scenarios")
                 resp.raise_for_status()
                 scenarios = resp.json()
-                choices = [s["scenario_id"] for s in scenarios]
-                return gr.Dropdown(choices=choices, value=choices[0] if choices else None)
+            for s in scenarios:
+                _scenario_meta[s["scenario_id"]] = {
+                    "name":        s.get("name", s["scenario_id"]),
+                    "description": s.get("description", ""),
+                }
+            # (display_name, scenario_id) tuples so dropdown shows friendly names
+            choices = [(m["name"], sid) for sid, m in _scenario_meta.items()]
+            first_id = scenarios[0]["scenario_id"] if scenarios else None
+            first_desc = _fmt_desc(first_id) if first_id else ""
+            return gr.Dropdown(choices=choices, value=first_id), first_desc
         except Exception:
-            return gr.Dropdown(choices=[], value=None)
+            return gr.Dropdown(choices=[], value=None), ""
 
-    demo.load(fn=_load_scenarios, inputs=[], outputs=[scenario_dropdown])
+    def _fmt_desc(scenario_id: str | None) -> str:
+        if not scenario_id or scenario_id not in _scenario_meta:
+            return ""
+        m = _scenario_meta[scenario_id]
+        desc = m["description"]
+        return f"*{desc}*" if desc else ""
+
+    demo.load(fn=_load_scenarios, inputs=[], outputs=[scenario_dropdown, scenario_desc])
 
     # ── Attach MutationObserver + Three.js habitat on page load ───────────
     demo.load(fn=None, js=_OBSERVER_JS)
@@ -913,6 +935,13 @@ with gr.Blocks(title="Selene") as demo:
 
     # ── WebSocket event pump — streams backend events into event_state ─────
     demo.load(fn=_event_stream, outputs=[event_state])
+
+    # ── Scenario description on dropdown change ────────────────────────────
+    scenario_dropdown.change(
+        fn=_fmt_desc,
+        inputs=[scenario_dropdown],
+        outputs=[scenario_desc],
+    )
 
     # ── Scenario start / reset ─────────────────────────────────────────────
     async def _start_scenario(scenario_id: str | None) -> str:
@@ -926,7 +955,8 @@ with gr.Blocks(title="Selene") as demo:
                     json={"scenario_id": scenario_id},
                 )
                 resp.raise_for_status()
-            return f"**Status:** Running — `{scenario_id}`"
+            name = _scenario_meta.get(scenario_id, {}).get("name", scenario_id)
+            return f"**Status:** Running — {name}"
         except Exception as exc:
             return f"**Status:** Error — {exc}"
 
