@@ -15,6 +15,7 @@ the layout and CSS so that the page loads with empty panels.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import os
@@ -1069,6 +1070,7 @@ _OBSERVER_JS = """
 # ---------------------------------------------------------------------------
 
 with gr.Blocks(title="LHADA — Lunar Habitat Anomaly Diagnosis Agent") as demo:
+    gr.HTML(value=f"<style>{_CSS}</style>")
 
     # ── Main two-column layout ──────────────────────────────────────────────
     with gr.Row():
@@ -1314,12 +1316,16 @@ with gr.Blocks(title="LHADA — Lunar Habitat Anomaly Diagnosis Agent") as demo:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    demo.launch(
-        server_name="0.0.0.0",
-        server_port=7860,
-        theme=Base(),
-        css=_CSS,
-    )
+    launch_kwargs = {
+        "server_name": "0.0.0.0",
+        "server_port": 7860,
+    }
+    launch_params = inspect.signature(demo.launch).parameters
+    if "css" in launch_params:
+        launch_kwargs["css"] = _CSS
+    if "theme" in launch_params:
+        launch_kwargs["theme"] = Base()
+    demo.launch(**launch_kwargs)
 
 
 if __name__ == "__main__":
