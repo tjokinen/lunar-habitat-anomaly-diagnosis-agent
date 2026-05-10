@@ -1,0 +1,40 @@
+[tool.poetry]
+name = "selene"
+version = "0.1.0"
+description = "Lunar habitat anomaly diagnosis agent with EDEN ISS data integration"
+authors = ["Tomi Jokinen <tomi.w.jokinen@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+pydantic = ">=2"
+pyyaml = "*"
+pandas = "*"
+numpy = "*"
+httpx = "*"
+fastapi = "*"
+uvicorn = "*"
+websockets = "*"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "*"
+pytest-asyncio = "*"
+ruff = "*"
+mypy = "*"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.mypy]
+python_version = "3.11"
+check_untyped_defs = true
+strict_optional = true
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
