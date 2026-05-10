@@ -1,0 +1,5 @@
+Filename,Path,Subsystem,Sensor Type (short),Sensor Type (long),Unit
+pressure-ams.csv,tcs/pressure-ams.csv,TCS,P,P,bar
+temp-ams_in.csv,tcs/temp-ams_in.csv,TCS,T,T,degrees celsius
+valve-ams.csv,tcs/valve-ams.csv,TCS,VALVE,VALVE,percent
+flow-rate-01.csv,nds/flow-rate-01.csv,NDS,V,V,litre

@@ -47,7 +47,7 @@ dmypy.json
 *~
 
 # Project data (EDEN ISS downloads)
-data/
+/data/
 
 # OS
 .DS_Store
