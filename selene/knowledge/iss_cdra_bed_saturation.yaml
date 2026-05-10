@@ -1,0 +1,91 @@
+id: iss_cdra_bed_saturation
+name: ISS CDRA Capacity-Limited Cabin CO2 Rise (synthesized from NASA ECLSS background)
+affected_subsystems:
+  - atmosphere_management_system
+primary_signature:
+  - sensor_pattern: cabin_co2_concentration
+    pattern_type: threshold_breach
+    direction: increasing
+    time_scale: hours
+    correlation_with: []
+secondary_signature:
+  - sensor_pattern: cabin_relative_humidity
+    pattern_type: slow_drift
+    direction: either
+    time_scale: hours
+    correlation_with:
+      - cabin_co2_concentration
+typical_onset: hours; cabin CO2 climbs when the metabolic generation rate exceeds the per-cycle removal capacity of the active CDRA configuration
+distinguishing_features:
+  - the scenario hypothesis is a capacity limitation rather than a subsystem health fault — the scrubber subsystem itself may be operating nominally
+  - the CO2 rise is on the timescale of crew activity (hours), not the timescale of a slow media degradation (days/weeks); this timescale separation is the cleanest discriminator from a scrubber-efficiency drift archetype
+  - elevated cabin CO2 above the long-duration exposure limit is a known operational concern on ISS; the recovery trajectory after metabolic load drops or after a redundant stage is brought online is the candidate test for the capacity-limit hypothesis (recovery on demand → capacity-limited; no recovery → hardware fault more likely)
+  - relative humidity coupling is physically plausible (desiccant drying is upstream of CO2 sorption in CDRA architecture) but is not verified to correlate reliably with capacity-limit events in any source cited here — treat any RH co-drift as supportive but not diagnostic
+differential_diagnosis:
+  - co2_scrubber_efficiency_drift
+  - co2_sensor_calibration_drift
+  - increased_metabolic_load_from_high_crew_activity
+  - desiccant_bed_breakthrough
+  - single_string_operation_during_maintenance
+  - intermodule_airflow_or_ventilation_disruption
+historical_context: |
+  This entry is a synthesized scenario, not a documented incident report. Provenance
+  disclosure:
+
+  Directly supported by the cited sources:
+  - The ISS CDRA is a regenerable swing-bed sorbent CO2 removal assembly (NASA OCHMO ECLSS
+    Technical Brief, 2023).
+  - Elevated cabin CO2 is a documented operational concern on ISS, with long-duration
+    exposure limits in the low-single-digit mmHg range.
+  - CDRA capacity is affected by crew metabolic load, single-string operation during
+    maintenance of a redundant assembly, and exercise activity blocks. These contributors
+    are general background in NASA ECLSS material.
+
+  Inferred / not directly stated by the cited sources:
+  - "Bed saturation / overload" is plausible engineering shorthand but is not the canonical
+    NASA fault terminology; NASA documents typically distinguish CDRA hardware faults,
+    degraded performance, single-bed operation, sorbent/desiccant issues, and valve faults
+    as separate categories.
+  - The previously asserted "cabin CO2 transfer function … characteristic asymmetric
+    oscillation" was a synthesized diagnostic heuristic; no specific NASA telemetry
+    signature in the cited sources establishes that asymmetric peaks-rise-faster-than-
+    troughs-fall behavior is the operational marker of a capacity event. That claim has
+    been removed.
+  - Reliable RH co-drift during capacity events is not confirmed in the cited sources; cabin
+    humidity is influenced by condensate recovery, ventilation, crew activity, and thermal
+    loops in addition to CDRA. Coupling is treated here as a hypothesis, not a feature.
+  - The "CDRA was designed for nominal four-crew metabolic CO2 load" framing has been
+    removed: ISS life support has evolved over time and supports larger crews, and the
+    cited sources do not anchor a specific nominal-crew design figure.
+  - The cited NASA OCHMO ECLSS brief is broad background material rather than direct
+    evidence for the detailed phenomenology in this entry; the ISS daily summaries archive
+    is a real archive but no specific entry is cited here. Both citations should be read as
+    pointers to the source material category, not as proofs of any specific telemetry
+    behavior described above.
+
+  The entry exists to give the agent a high-prior alternative hypothesis to weigh against
+  a slow scrubber-degradation diagnosis when cabin CO2 rises on the timescale of hours.
+citations:
+  - source_type: NTRS
+    identifier: ECLSS-OCHMO-2023
+    title: NASA Office of the Chief Health and Medical Officer ECLSS Technical Brief (2023) — broad ECLSS background; supports CDRA architecture and CO2 exposure limits, not specific telemetry signatures
+    url: https://www.nasa.gov/wp-content/uploads/2023/07/eclss-technical-brief-ochmo.pdf
+  - source_type: ISS_daily
+    identifier: CDRA-operations-archive
+    title: ISS Daily Summaries (NASA Mission Control archive) — pointer to operational-context source category; no specific entry cited in support of any signature described in this YAML
+    url: https://www.nasa.gov/blogs/spacestation/
+typical_response: |
+  No specific operator playbook for this exact scenario class is cited from the source
+  material; the following are candidate response actions consistent with general ECLSS
+  practice rather than a recorded procedure:
+  (1) cross-check cabin CO2 readings across multiple sensors and across modules to rule
+      out a single-sensor calibration drift before treating the rise as real;
+  (2) consider non-hardware mitigations first — defer non-critical high-exertion activity,
+      increase air-mixing fans to prevent local CO2 pockets, bring a redundant scrubber
+      stage online or adjust cycling — and observe whether the trend recovers on demand;
+  (3) recovery on demand supports the capacity-limit hypothesis; persistence after both
+      stages are running and metabolic load is reduced raises prior weight on a scrubber
+      hardware fault;
+  (4) treat capacity limitation, sensor calibration drift, single-string operation,
+      desiccant breakthrough, and ventilation/airflow disruption as hypotheses of
+      comparable prior weight pending diagnostic data, rather than ranked conclusions.

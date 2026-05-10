@@ -1,0 +1,90 @@
+id: eden_iss_pump_degradation
+name: Synthetic NDS Pump/Circulation Anomaly Archetype Inspired by EDEN ISS Telemetry
+affected_subsystems:
+  - nutrient_delivery_system
+primary_signature:
+  - sensor_pattern: nutrient_loop_pressure
+    pattern_type: oscillation
+    direction: either
+    time_scale: hours
+    correlation_with:
+      - nutrient_electrical_conductivity
+  - sensor_pattern: nutrient_electrical_conductivity
+    pattern_type: oscillation
+    direction: either
+    time_scale: hours
+    correlation_with:
+      - nutrient_loop_pressure
+secondary_signature:
+  - sensor_pattern: nutrient_tank_level
+    pattern_type: slow_drift
+    direction: either
+    time_scale: days
+    correlation_with: []
+  - sensor_pattern: nutrient_ph
+    pattern_type: oscillation
+    direction: either
+    time_scale: hours
+    correlation_with:
+      - nutrient_electrical_conductivity
+typical_onset: hypothesized — gradual increase in oscillation amplitude on the loop pressure and EC sensors over days to weeks; intermittent at first, then sustained
+distinguishing_features:
+  - oscillation appears simultaneously on pressure and EC sensors of the same NDS loop (multi-sensor, not single-threshold-breach) — the kind of signature unsupervised detectors like DAMP/MDI are well-suited for
+  - tank level may co-drift over a longer horizon, but the cause of any tank-level drift is not established by the source paper and could equally reflect dosing, evaporation, sampling, or sensor effects
+  - PH excursions may track the EC oscillation; the source paper does not establish the mechanism, so this is best treated as a coupling hypothesis rather than a confirmed cascade
+  - the EDEN ISS NDS sub-system instruments two tanks, with redundant EC and PH probes per tank (e.g. ec-tank1_1 and ec-tank1_2) — within-tank probe agreement is the cleanest way to separate a real loop event from single-probe drift
+differential_diagnosis:
+  - control_loop_tuning_error
+  - dissolved_air_bubble_in_pump
+  - ec_probe_calibration_drift
+  - tank_inlet_partial_blockage
+  - pump_bearing_wear_or_cavitation
+historical_context: |
+  This entry is a hypothesized engineering archetype, not a documented historical EDEN ISS
+  failure case. Provenance disclosure:
+
+  Directly supported by the source material:
+  - The EDEN ISS NDS subsystem instruments pressure (8 sensors), electrical conductivity (4),
+    pH (4), temperature (4), tank level (2), and tank volume (2) — verified against the
+    Zenodo dataset metadata (record 11485183).
+  - Rewicki et al. (2024, https://arxiv.org/abs/2406.09825) apply unsupervised anomaly
+    detection (including DAMP/MDI-style methods) to recurring multivariate anomaly patterns
+    across EDEN ISS subsystems, and explicitly decline to assign confirmed root causes to the
+    detected events ("we lack evidence to assert consistent underlying causes across
+    instances").
+
+  Inferred / not directly stated by the paper:
+  - The "pump" attribution. The paper identifies anomaly shapes, not mechanical causes; pump
+    wear, bearing degradation, cavitation, and impeller faults are this entry's hypothesized
+    causes, listed in differential_diagnosis as one set of candidates among others.
+  - The on-site crew remediation narrative previously in this entry (pump bearing swap from
+    on-site spares, manual bleed-and-reprime procedures) is not sourced from the paper or
+    from any EDEN ISS operations log cited here, and has been removed.
+  - The "lunar-analog" framing belongs in pitch material, not in a knowledge-base entry.
+
+  The entry exists to give the agent a multi-sensor oscillatory archetype against which to
+  reason; reviewers should treat the named root-cause candidates as hypotheses for the agent
+  to weigh, not as established history.
+citations:
+  - source_type: paper
+    identifier: arXiv:2406.09825
+    title: "Unraveling Anomalies in Time: Unsupervised Discovery and Isolation of Anomalous Behavior in Bio-regenerative Life Support System Telemetry (Rewicki, Gawlikowski, Niebling, Denzler 2024)"
+    url: https://arxiv.org/abs/2406.09825
+  - source_type: EDEN_ISS_dataset
+    identifier: zenodo.11485183
+    title: EDEN ISS Plant Health Monitoring Dataset (DLR, 2024)
+    url: https://zenodo.org/records/11485183
+typical_response: |
+  No operator playbook is documented for this pattern in the source paper. The following are
+  candidate response actions for this scenario class, listed without ranking, rather than a
+  recorded procedure:
+  (1) compare redundant within-tank probes (ec-tank*_1 vs ec-tank*_2; ph-tank*_1 vs
+      ph-tank*_2) — disagreement isolates a single-probe drift; agreement supports a
+      genuine loop-side event;
+  (2) compare across the two NDS tanks — an oscillation localized to one tank's loop
+      narrows the suspect set to that loop's hardware;
+  (3) review controller setpoint logs for recent tuning changes before suspecting a
+      hardware fault;
+  (4) treat pump bearing wear, cavitation, dissolved-air entrainment, partial inlet
+      blockage, and probe drift as hypotheses of comparable prior weight, since none is
+      established in the source data.

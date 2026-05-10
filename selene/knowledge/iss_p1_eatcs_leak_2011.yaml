@@ -1,0 +1,72 @@
+id: iss_p1_eatcs_leak_2011
+name: ISS Port 1 EATCS Ammonia Leak (Loop A, 2011–2013)
+affected_subsystems:
+  - thermal_control_system
+primary_signature:
+  - sensor_pattern: thermal_loop_pressure
+    pattern_type: slow_drift
+    direction: decreasing
+    time_scale: weeks
+    correlation_with:
+      - thermal_loop_quantity
+      - thermal_loop_valve_position
+  - sensor_pattern: thermal_loop_quantity
+    pattern_type: slow_drift
+    direction: decreasing
+    time_scale: weeks
+    correlation_with:
+      - thermal_loop_pressure
+secondary_signature:
+  - sensor_pattern: thermal_loop_valve_position
+    pattern_type: slow_drift
+    direction: increasing
+    time_scale: days
+    correlation_with:
+      - thermal_loop_pressure
+  - sensor_pattern: thermal_loop_temperature
+    pattern_type: slow_drift
+    direction: increasing
+    time_scale: hours
+    correlation_with:
+      - thermal_loop_valve_position
+typical_onset: gradual over weeks to years; decay rate accelerates as mechanical damage at the leak site progresses
+distinguishing_features:
+  - decay rate of the loop pressure accelerates over time rather than decaying linearly
+  - representative telemetry progression: pressure → loop quantity → flow control valve position → downstream temperatures (consistent with expected closed-loop thermal control behavior under progressive coolant loss; NASA sources directly cite pressure and inventory decay, the valve and temperature stages are engineering inferences)
+  - leak is not localized by any single sensor; it is inferred from system-level mass-balance drift
+  - working fluid (ammonia on EATCS) is not directly measured — only its bulk-state proxies are
+differential_diagnosis:
+  - sensor_calibration_drift
+  - flow_control_valve_stuck_open
+  - radiator_panel_thermal_short
+  - pump_cavitation
+historical_context: |
+  A slow ammonia leak in the ISS Port 1 (P1) segment of the External Active Thermal Control
+  System (EATCS) Loop A was first operationally detected in 2011 through long-term loop
+  pressure and ammonia quantity telemetry trends. The leak rate gradually accelerated over
+  the following years; in May 2013 a sharp acceleration was visually confirmed by
+  crystallized ammonia flakes venting from the truss, and ISS flight controllers ordered an
+  unscheduled EVA on 2013-05-11 to swap the suspect Pump Flow Control Subassembly (PFCS).
+  The post-incident reviews (NTRS 20190029027, NTRS 20220003097) document the long-horizon
+  telemetry warning and the operationally relevant signatures (pressure decline, ammonia
+  inventory decay, accelerating leak rate). The cascade across pressure → quantity → valve
+  position → downstream temperature is presented in this entry as a representative telemetry
+  progression consistent with closed-loop thermal control behavior during progressive
+  coolant loss, not as a NASA-formulated canonical signature.
+citations:
+  - source_type: NTRS
+    identifier: "20190029027"
+    title: The International Space Station (ISS) Port 1 (P1) External Active Thermal Control System (EATCS) Ammonia Leak (Cowan, Bond, Metcalf, 2019)
+    url: https://ntrs.nasa.gov/citations/20190029027
+  - source_type: NTRS
+    identifier: "20220003097"
+    title: Coolant Leak from ISS External Active Thermal Control System (EATCS) - An Examination of Most Probable (Cowan et al., 2022)
+    url: https://ntrs.nasa.gov/citations/20220003097
+typical_response: |
+  Ground controllers tracked the trend over a long horizon rather than reacting to any single
+  sample. The standard playbook was: (1) confirm the trend against multiple correlated sensors
+  to rule out single-sensor calibration drift, (2) reconfigure loop interconnects to cross-feed
+  from the unaffected loop, (3) draw replenishment ammonia from the on-orbit reservoir while
+  modeling time-to-depletion, and (4) plan a contingency EVA when the projected depletion date
+  approached the EVA preparation lead time. The May 2013 EVA is the reference example of step 4
+  being executed under accelerated timeline pressure.

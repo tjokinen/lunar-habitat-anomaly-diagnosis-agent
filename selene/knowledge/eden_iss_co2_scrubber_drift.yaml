@@ -1,0 +1,68 @@
+id: eden_iss_co2_scrubber_drift
+name: EDEN ISS AMS CO2 Baseline Drift (synthetic interpretation of Rewicki et al. anomaly classes)
+affected_subsystems:
+  - atmosphere_management_system
+primary_signature:
+  - sensor_pattern: cabin_co2_concentration
+    pattern_type: slow_drift
+    direction: increasing
+    time_scale: days
+    correlation_with:
+      - cabin_relative_humidity
+secondary_signature:
+  - sensor_pattern: cabin_relative_humidity
+    pattern_type: slow_drift
+    direction: either
+    time_scale: days
+    correlation_with:
+      - cabin_co2_concentration
+  - sensor_pattern: cabin_temperature
+    pattern_type: slow_drift
+    direction: either
+    time_scale: days
+    correlation_with: []
+typical_onset: gradual rise in baseline CO2 concentration over days to weeks while the diurnal photosynthesis cycle remains intact
+distinguishing_features:
+  - the diurnal CO2 oscillation amplitude (drawdown during illumination, recovery during dark) is preserved — only the baseline shifts upward
+  - relative humidity may co-drift in the same window (paper anomaly candidate "Temperature + CO2 Peak with RH Drop" and "Level Shift")
+  - VPD (vapor pressure deficit) follows from temperature × RH and may shift even if temperature is steady
+  - the pattern is a baseline shift rather than a peak or transient — distinguishing it from the paper's "CO2 Peak" anomaly candidate even though both involve the same sensors
+differential_diagnosis:
+  - co2_sensor_calibration_drift
+  - increased_plant_respiration_due_to_thermal_stress
+  - reduced_air_exchange_between_FEG_and_SES
+  - photosynthesis_shortfall_from_illumination_degradation
+  - scrubber_media_efficiency_loss_or_saturation
+historical_context: |
+  This entry is a synthetic but physically plausible scenario derived from the recurring
+  multivariate AMS anomaly patterns described in Rewicki et al. (2024,
+  https://arxiv.org/abs/2406.09825). The paper documents three concrete anomaly candidate
+  classes on the AMS-SES sensors — "CO2 Peak", "Temperature + CO2 Peak with RH Drop", and
+  "Level Shift" — and explicitly declines to assign confirmed root causes, stating that the
+  authors "lack evidence to assert consistent underlying causes across instances." This KB
+  entry takes the "Level Shift" pattern (a sustained baseline rise rather than a peak) and
+  treats it as a hypothesized scenario class for the agent to reason about. No EDEN ISS
+  operator log, maintenance record, or scrubber service event is cited in support of the
+  scenario; the entry exists to give the agent a plausible non-thermal anomaly archetype to
+  match against during diagnosis, with the scrubber-degradation hypothesis listed as one of
+  several alternative interpretations the agent should consider rather than a documented
+  root cause.
+citations:
+  - source_type: paper
+    identifier: arXiv:2406.09825
+    title: "Unraveling Anomalies in Time: Unsupervised Discovery and Isolation of Anomalous Behavior in Bio-regenerative Life Support System Telemetry (Rewicki, Gawlikowski, Niebling, Denzler 2024)"
+    url: https://arxiv.org/abs/2406.09825
+  - source_type: EDEN_ISS_dataset
+    identifier: zenodo.11485183
+    title: EDEN ISS Plant Health Monitoring Dataset (DLR, 2024)
+    url: https://zenodo.org/records/11485183
+typical_response: |
+  Because no operator playbook is documented for this pattern in the source paper, the
+  following are candidate response actions for this scenario class rather than a recorded
+  procedure: (1) cross-check the trend across both AMS-FEG and AMS-SES CO2 sensors to rule
+  out single-sensor calibration drift; (2) compare against PAR sensors in ICS — a falling
+  PAR baseline implicates reduced photosynthetic CO2 uptake (illumination degradation)
+  rather than an atmosphere-side fault; (3) inspect for shared duct/fan or air-exchange
+  changes between FEG and SES if both sensors co-drift; (4) treat scrubber media degradation
+  as a hypothesis of last resort rather than a default conclusion, since the source paper
+  does not establish that link.

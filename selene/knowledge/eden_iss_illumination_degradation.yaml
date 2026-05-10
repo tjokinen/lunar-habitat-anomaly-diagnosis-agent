@@ -1,0 +1,72 @@
+id: eden_iss_illumination_degradation
+name: Synthetic Illumination Degradation Scenario Inspired by EDEN ISS Telemetry
+affected_subsystems:
+  - illumination_control_system
+  - atmosphere_management_system
+primary_signature:
+  - sensor_pattern: par_intensity
+    pattern_type: slow_drift
+    direction: decreasing
+    time_scale: weeks
+    correlation_with: []
+secondary_signature:
+  - sensor_pattern: par_intensity_uniformity
+    pattern_type: slow_drift
+    direction: decreasing
+    time_scale: weeks
+    correlation_with:
+      - par_intensity
+  - sensor_pattern: cabin_co2_concentration
+    pattern_type: slow_drift
+    direction: increasing
+    time_scale: weeks
+    correlation_with:
+      - par_intensity
+typical_onset: hypothesized gradual reduction in delivered PAR over weeks to months, with the daily on/off cycle envelope intact but the illuminated-phase plateau lower than baseline
+distinguishing_features:
+  - drift is on the on-phase plateau height, not on the rise/fall edges or the off-phase floor — detection must compare same-phase samples rather than rolling averages, since the daily on/off cycle dominates the raw signal
+  - PAR is measured by a small number of sensors (3 in the EDEN ISS dataset, all in AMS-FEG/AMS-SES rather than ICS), so per-panel uniformity cannot be observed directly — only the array-level mean
+  - this scenario is distinct from the paper-documented ICS anomaly classes (anomalous day phases, interrupted cooldowns, delayed warmups, missing day/night transitions), which appear on ICS temperature sensors as transient or step-like patterns rather than as a slow PAR plateau drift
+  - the inferred coupling to CO2 (weakened photosynthetic drawdown raising the CO2 baseline) is physically plausible but not demonstrated in the source paper — treat it as a hypothesis to test against the data, not as an established cascade
+differential_diagnosis:
+  - par_sensor_soiling_or_calibration_drift
+  - power_supply_voltage_droop
+  - light_diffuser_panel_fogging
+  - co2_scrubber_efficiency_drift
+  - led_panel_lumen_depreciation
+historical_context: |
+  This entry is a synthetic but physically plausible scenario, not a documented historical
+  failure case. The EDEN ISS telemetry dataset includes PAR (photosynthetically active
+  radiation) measurements in the Atmosphere Management System (AMS-FEG and AMS-SES) and
+  temperature telemetry associated with the Illumination Control System (ICS). Rewicki et
+  al. (2024, https://arxiv.org/abs/2406.09825) identify recurring anomalous operational
+  patterns in ICS telemetry — including anomalous day phases, interrupted cooldowns,
+  delayed warmups, and missing day/night transitions — and apply shape-based clustering to
+  isolate recurring anomalous behavior. The published work does not document confirmed LED
+  degradation events, panel aging failures, or maintenance/replacement actions, and
+  explicitly declines to assign root causes to its anomaly clusters. The scenario in this
+  entry constructs a hypothesized PAR-decline trajectory inspired by the dataset's sensor
+  composition; a gradual reduction in effective illumination would theoretically manifest
+  as declining PAR plateaus together with weakened photosynthetic CO2 drawdown, but that
+  causal chain is inferred rather than empirically established here.
+citations:
+  - source_type: paper
+    identifier: arXiv:2406.09825
+    title: "Unraveling Anomalies in Time: Unsupervised Discovery and Isolation of Anomalous Behavior in Bio-regenerative Life Support System Telemetry (Rewicki, Gawlikowski, Niebling, Denzler 2024)"
+    url: https://arxiv.org/abs/2406.09825
+  - source_type: EDEN_ISS_dataset
+    identifier: zenodo.11485183
+    title: EDEN ISS Plant Health Monitoring Dataset (DLR, 2024)
+    url: https://zenodo.org/records/11485183
+typical_response: |
+  Because no operator playbook is documented for this pattern in the source paper, the
+  following are candidate response actions for this scenario class rather than a recorded
+  procedure: (1) cross-check the PAR drift against a calibrated reference reading or a
+  second AMS PAR sensor to rule out single-sensor calibration drift or soiling; (2) inspect
+  the ICS temperature telemetry for the paper-documented anomaly patterns (interrupted
+  cooldowns, delayed warmups, missing day/night transitions) — their presence or absence
+  helps separate a hardware-side fault from a sensor-side artefact; (3) examine the AMS CO2
+  baseline for a co-trending rise — supportive but not conclusive of reduced photosynthetic
+  uptake; (4) treat LED lumen depreciation, power supply droop, and diffuser fogging as
+  hypotheses of comparable prior weight rather than ranked conclusions, since none is
+  established in the source data.
