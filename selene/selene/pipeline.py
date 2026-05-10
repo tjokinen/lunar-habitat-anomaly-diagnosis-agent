@@ -30,6 +30,7 @@ async def run_pipeline(
     window_size: timedelta = timedelta(hours=1),
     *,
     dedup_cooldown: timedelta = timedelta(minutes=5),
+    max_concurrent_investigations: int = 2,
 ) -> None:
     """Stream telemetry, run detectors, dispatch investigation tasks.
 
@@ -46,6 +47,7 @@ async def run_pipeline(
     # (detector_name, sensor_id) -> last-fired timestamp
     dedup_cache: dict[tuple[str, str], datetime] = {}
     investigation_tasks: set[asyncio.Task] = set()
+    investigation_sem = asyncio.Semaphore(max_concurrent_investigations)
 
     async def _emit(event: Event) -> None:
         await event_handler(event)
@@ -95,9 +97,9 @@ async def run_pipeline(
                     # Emit the deduped anomaly event
                     await _emit(anomaly_event)
 
-                    # Fire-and-forget investigation
+                    # Fire-and-forget investigation (gated by semaphore)
                     task = asyncio.create_task(
-                        _investigate(agent, anomaly_event, _emit)
+                        _investigate(agent, anomaly_event, _emit, investigation_sem)
                     )
                     investigation_tasks.add(task)
                     task.add_done_callback(investigation_tasks.discard)
@@ -111,8 +113,10 @@ async def _investigate(
     agent: ReasoningAgent,
     trigger: AnomalyEvent,
     emit: _EventHandler,
+    sem: asyncio.Semaphore,
 ) -> None:
-    try:
-        await agent.investigate(trigger, emit)
-    except Exception as exc:
-        logger.error("Investigation failed for trigger %s: %s", trigger, exc)
+    async with sem:
+        try:
+            await agent.investigate(trigger, emit)
+        except Exception as exc:
+            logger.error("Investigation failed for trigger %s: %s", trigger, exc)
