@@ -1202,10 +1202,12 @@ with gr.Blocks(title="Selene") as demo:
             payload = {**payload, "scenario_name": _scenario_meta[scenario_id]["name"]}
         return json.dumps(payload)
 
-    async def _start_scenario(scenario_id: str | None) -> tuple[str, str]:
+    async def _start_scenario(scenario_id: str | None):
         if not scenario_id:
-            return "**Status:** No scenario selected", json.dumps(
-                {"active": False, "scenario_id": None, "ground_truth": None}
+            return (
+                "**Status:** No scenario selected",
+                json.dumps({"active": False, "scenario_id": None, "ground_truth": None}),
+                gr.Button(interactive=True),
             )
         import httpx
         try:
@@ -1220,20 +1222,21 @@ with gr.Blocks(title="Selene") as demo:
             return (
                 f"**Status:** Running — {name}",
                 _scenario_payload_json(data, scenario_id),
+                gr.Button(interactive=False),
             )
         except Exception as exc:
-            return f"**Status:** Error — {exc}", ""
+            return f"**Status:** Error — {exc}", "", gr.Button(interactive=True)
 
-    async def _reset_scenario() -> tuple[str, str]:
+    async def _reset_scenario():
         import httpx
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
                 resp = await client.post(f"{BACKEND_URL}/scenario/reset")
                 resp.raise_for_status()
                 data = resp.json()
-            return "**Status:** Nominal (reset)", _scenario_payload_json(data, None)
+            return "**Status:** Nominal (reset)", _scenario_payload_json(data, None), gr.Button(interactive=True)
         except Exception as exc:
-            return f"**Status:** Error — {exc}", ""
+            return f"**Status:** Error — {exc}", "", gr.Button(interactive=True)
 
     async def _load_active_scenario() -> str:
         """Fetched on page load so a refresh restores the scenario timeline."""
@@ -1251,12 +1254,12 @@ with gr.Blocks(title="Selene") as demo:
     start_btn.click(
         fn=_start_scenario,
         inputs=[scenario_dropdown],
-        outputs=[status_label, scenario_state],
+        outputs=[status_label, scenario_state, start_btn],
     )
     reset_btn.click(
         fn=_reset_scenario,
         inputs=[],
-        outputs=[status_label, scenario_state],
+        outputs=[status_label, scenario_state, start_btn],
     )
     demo.load(fn=_load_active_scenario, inputs=[], outputs=[scenario_state])
 
