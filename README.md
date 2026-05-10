@@ -14,9 +14,6 @@ Agentic Workflows).
 
 ## What's real, what's simulated
 
-This distinction is load-bearing. State it clearly so reviewers don't have to
-ask.
-
 **Real and verified**
 
 - **EDEN ISS 2020 Telemetry Dataset** — public, peer-reviewed, downloadable
