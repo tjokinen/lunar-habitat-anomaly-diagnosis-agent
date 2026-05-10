@@ -46,6 +46,7 @@ _DATA_PATH: Path = Path("data/eden_iss/edeniss2020")
 _SPEED_MULTIPLIER: float = 60.0
 
 _scenario_registry: dict[str, Any] = {}   # scenario_id -> AnomalyModule
+_active_scenario_id: str | None = None
 _pipeline_task: asyncio.Task | None = None
 _pipeline_stop: asyncio.Event = asyncio.Event()
 
@@ -119,7 +120,23 @@ async def _run_pipeline_task(
 ) -> None:
     global _store, _agent, _replayer
 
-    replayer = EdenIssReplayer(data_path, speed_multiplier=speed_multiplier)
+    # When a scenario is selected, fast-forward the replayer to a short
+    # warmup window before the anomaly onset. Otherwise the replayer would
+    # tick through months of nominal data (the dataset starts in early 2020,
+    # the scenarios are anchored at 2020-06-01) before the anomaly window.
+    replayer_start = None
+    if scenario_id and scenario_id in _scenario_registry:
+        try:
+            gt = _scenario_registry[scenario_id].get_ground_truth()
+            replayer_start = gt.start_time - timedelta(minutes=30)
+        except Exception as exc:
+            logger.warning("Could not resolve scenario start_time: %s", exc)
+
+    replayer = EdenIssReplayer(
+        data_path,
+        start_time=replayer_start,
+        speed_multiplier=speed_multiplier,
+    )
     _replayer = replayer
 
     source = replayer
@@ -150,16 +167,33 @@ async def _run_pipeline_task(
 
 
 async def _start_pipeline(scenario_id: str | None = None) -> None:
-    global _pipeline_task
+    global _pipeline_task, _active_scenario_id
     if _pipeline_task and not _pipeline_task.done():
         _pipeline_task.cancel()
         try:
             await _pipeline_task
         except (asyncio.CancelledError, Exception):
             pass
+    _active_scenario_id = scenario_id
     _pipeline_task = asyncio.create_task(
         _run_pipeline_task(_DATA_PATH, scenario_id, _SPEED_MULTIPLIER)
     )
+
+
+def _scenario_active_payload() -> dict[str, Any]:
+    """Return the current scenario + its ground-truth window (or {active:false})."""
+    if _active_scenario_id is None or _active_scenario_id not in _scenario_registry:
+        return {"active": False, "scenario_id": None, "ground_truth": None}
+    module = _scenario_registry[_active_scenario_id]
+    try:
+        gt = module.get_ground_truth().model_dump(mode="json")
+    except Exception:
+        gt = None
+    return {
+        "active": True,
+        "scenario_id": _active_scenario_id,
+        "ground_truth": gt,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -259,13 +293,24 @@ async def start_scenario(req: ScenarioStartRequest):
                    f"Known: {sorted(_scenario_registry)}",
         )
     await _start_pipeline(scenario_id=req.scenario_id)
-    return {"status": "started", "scenario_id": req.scenario_id}
+    return {
+        **_scenario_active_payload(),
+        "status": "started",
+        "scenario_id": req.scenario_id,
+    }
 
 
 @app.post("/scenario/reset")
 async def reset_scenario():
     await _start_pipeline(scenario_id=None)
-    return {"status": "reset"}
+    return {**_scenario_active_payload(), "status": "reset"}
+
+
+@app.get("/scenario/active")
+async def get_active_scenario():
+    """Current scenario + its ground-truth window. Used by the frontend to
+    render the anomaly timeline (when did it start, when does it end)."""
+    return _scenario_active_payload()
 
 
 @app.get("/replay/speed")

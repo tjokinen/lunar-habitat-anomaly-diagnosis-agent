@@ -325,6 +325,11 @@ _DATA_PANEL_HTML = """
     <span class="speed-indicator" id="speed-indicator" title="Replay speed">—×</span>
     <span class="comm-window" id="comm-window-label">Earth link: 2.6 s RTT</span>
   </div>
+  <div class="scenario-timeline" id="scenario-timeline">
+    <div class="st-state" id="st-state">No scenario running.</div>
+    <div class="st-bar" id="st-bar"><div class="st-fill" id="st-fill"></div></div>
+    <div class="st-meta" id="st-meta"></div>
+  </div>
   <table class="sensor-table" id="sensor-table">
     <thead>
       <tr>
@@ -392,8 +397,126 @@ _DATA_PANEL_JS = r"""
     if (!clockEl) return;
     const sim = simNowMs();
     if (sim !== null) clockEl.textContent = fmtTime(new Date(sim));
+    updateScenarioTimeline();
   }
   setInterval(tickClock, 1000);
+
+  // ── Scenario timeline ──────────────────────────────────────────────────
+  // ground_truth = { scenario_id, start_time, end_time, affected_sensors, description }
+  // OR null if no scenario is active.
+  let scenarioGT = null;
+  let scenarioName = null;
+  let firstDetectionMs = null;   // wall-clock-aligned sim time of first agent_run_started
+
+  function fmtDur(ms) {
+    if (ms == null || isNaN(ms)) return '—';
+    const sign = ms < 0 ? '-' : '';
+    const s = Math.abs(Math.round(ms / 1000));
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    if (h > 0) return sign + h + 'h ' + m + 'm';
+    if (m > 0) return sign + m + 'm ' + sec + 's';
+    return sign + sec + 's';
+  }
+
+  function setTimelineClass(cls) {
+    const el = document.getElementById('scenario-timeline');
+    if (!el) return;
+    el.className = 'scenario-timeline ' + cls;
+  }
+
+  function updateScenarioTimeline() {
+    const stateEl = document.getElementById('st-state');
+    const fillEl  = document.getElementById('st-fill');
+    const metaEl  = document.getElementById('st-meta');
+    if (!stateEl || !fillEl || !metaEl) return;
+
+    if (!scenarioGT) {
+      setTimelineClass('st-idle');
+      stateEl.innerHTML = '<span class="st-label">No scenario running.</span>' +
+                          '<span class="st-phase">Monitoring nominal telemetry.</span>';
+      fillEl.style.width = '0%';
+      metaEl.innerHTML = '';
+      return;
+    }
+
+    const start = new Date(scenarioGT.start_time).getTime();
+    const end   = new Date(scenarioGT.end_time).getTime();
+    const now   = simNowMs();
+    if (now == null || isNaN(start) || isNaN(end) || end <= start) {
+      setTimelineClass('st-idle');
+      stateEl.innerHTML = '<span class="st-label">' + esc(scenarioName || scenarioGT.scenario_id) + '</span>' +
+                          '<span class="st-phase">waiting for telemetry…</span>';
+      fillEl.style.width = '0%';
+      metaEl.innerHTML = '';
+      return;
+    }
+
+    const total = end - start;
+    let phase, pct, phaseLabel;
+    if (now < start) {
+      phase = 'st-pre';
+      pct = 0;
+      phaseLabel = 'Pre-onset · starts in ' + fmtDur(start - now);
+    } else if (now < end) {
+      phase = 'st-active';
+      pct = Math.max(0, Math.min(100, ((now - start) / total) * 100));
+      phaseLabel = 'Anomaly active · ' + fmtDur(now - start) + ' / ' + fmtDur(total);
+    } else {
+      phase = 'st-post';
+      pct = 100;
+      phaseLabel = 'Anomaly window ended · ' + fmtDur(now - end) + ' ago';
+    }
+
+    setTimelineClass(phase);
+    stateEl.innerHTML = '<span class="st-label">' + esc(scenarioName || scenarioGT.scenario_id) + '</span>' +
+                        '<span class="st-phase">' + esc(phaseLabel) + '</span>';
+    fillEl.style.width = pct.toFixed(1) + '%';
+
+    let detectionLine = 'Detection: <span style="color:#737373;">—</span>';
+    if (firstDetectionMs != null) {
+      const lag = firstDetectionMs - start;
+      const lagLabel = lag >= 0
+        ? '+' + fmtDur(lag) + ' after onset'
+        : fmtDur(lag) + ' before onset';
+      detectionLine = 'Detection: <span style="color:#f59e0b;">' +
+                      esc(fmtTime(new Date(firstDetectionMs))) + '</span> · ' +
+                      esc(lagLabel);
+    }
+
+    metaEl.innerHTML =
+      '<span>Onset ' + esc(fmtTime(new Date(start))) +
+        ' → end ' + esc(fmtTime(new Date(end))) + '</span>' +
+      '<span>' + detectionLine + '</span>';
+  }
+
+  function esc(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  window.addEventListener('selene:scenario', (e) => {
+    const d = e.detail || {};
+    if (d.active && d.ground_truth) {
+      scenarioGT = d.ground_truth;
+      scenarioName = d.scenario_name || d.scenario_id || null;
+      firstDetectionMs = null;   // new scenario → reset detection lag
+    } else {
+      scenarioGT = null;
+      scenarioName = null;
+      firstDetectionMs = null;
+    }
+    updateScenarioTimeline();
+  });
+
+  window.addEventListener('selene:first-detection', (e) => {
+    const ts = e.detail && e.detail.timestamp;
+    if (!ts) return;
+    if (firstDetectionMs == null) {
+      firstDetectionMs = new Date(ts).getTime();
+      updateScenarioTimeline();
+    }
+  });
 
 
   // ── Speed indicator (set by Gradio via window.__seleneSetSpeed) ──────────
@@ -730,6 +853,10 @@ _INVESTIGATION_JS = r"""
       });
       // Cap retained history.
       if (runs.length > 12) runs.length = 12;
+      // Notify the data panel so the scenario timeline can show
+      // detection lag (it dedups internally).
+      window.dispatchEvent(new CustomEvent('selene:first-detection',
+        { detail: { timestamp: ev.timestamp } }));
       render();
     }
 
@@ -905,6 +1032,30 @@ _OBSERVER_JS = """
     obs.observe(root, { childList: true, subtree: true, characterData: true, attributes: true });
   }
   attachSeleneObserver();
+
+  // ── Scenario-state observer (separate textbox, fires `selene:scenario`) ──
+  function dispatchScenario(raw) {
+    if (!raw) return;
+    try {
+      const data = JSON.parse(raw);
+      window.dispatchEvent(new CustomEvent('selene:scenario', { detail: data }));
+    } catch(_) {}
+  }
+  function attachScenarioObserver() {
+    const root = document.querySelector('#scenario-state');
+    if (!root) { setTimeout(attachScenarioObserver, 200); return; }
+    const ta = root.querySelector('textarea') || root.querySelector('input');
+    if (!ta) { setTimeout(attachScenarioObserver, 200); return; }
+    console.log('[selene] scenario observer attached');
+    let lastVal = '';
+    setInterval(() => {
+      if (ta.value !== lastVal) { lastVal = ta.value; dispatchScenario(ta.value); }
+    }, 200);
+    new MutationObserver(() => {
+      if (ta.value !== lastVal) { lastVal = ta.value; dispatchScenario(ta.value); }
+    }).observe(root, { childList: true, subtree: true, characterData: true, attributes: true });
+  }
+  attachScenarioObserver();
 }
 """
 
@@ -981,6 +1132,19 @@ with gr.Blocks(title="Selene") as demo:
         interactive=False,
     )
 
+    # Hidden Textbox carrying the active scenario + ground-truth window as
+    # JSON.  Written by _start_scenario / _reset_scenario / _load_active_scenario
+    # and observed by the scenario-timeline JS (selene:scenario events).
+    scenario_state = gr.Textbox(
+        value="",
+        elem_id="scenario-state",
+        elem_classes=["selene-hidden"],
+        show_label=False,
+        lines=1,
+        max_lines=1,
+        interactive=False,
+    )
+
     # scenario_id → {name, description} — filled on load, read by desc handler
     _scenario_meta: dict[str, dict] = {}
 
@@ -1031,9 +1195,18 @@ with gr.Blocks(title="Selene") as demo:
     )
 
     # ── Scenario start / reset ─────────────────────────────────────────────
-    async def _start_scenario(scenario_id: str | None) -> str:
+    def _scenario_payload_json(payload: dict, scenario_id: str | None) -> str:
+        """Augment a /scenario/* JSON response with the friendly scenario name
+        and dump to a JSON string for the hidden #scenario-state textbox."""
+        if scenario_id and scenario_id in _scenario_meta:
+            payload = {**payload, "scenario_name": _scenario_meta[scenario_id]["name"]}
+        return json.dumps(payload)
+
+    async def _start_scenario(scenario_id: str | None) -> tuple[str, str]:
         if not scenario_id:
-            return "**Status:** No scenario selected"
+            return "**Status:** No scenario selected", json.dumps(
+                {"active": False, "scenario_id": None, "ground_truth": None}
+            )
         import httpx
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
@@ -1042,31 +1215,50 @@ with gr.Blocks(title="Selene") as demo:
                     json={"scenario_id": scenario_id},
                 )
                 resp.raise_for_status()
+                data = resp.json()
             name = _scenario_meta.get(scenario_id, {}).get("name", scenario_id)
-            return f"**Status:** Running — {name}"
+            return (
+                f"**Status:** Running — {name}",
+                _scenario_payload_json(data, scenario_id),
+            )
         except Exception as exc:
-            return f"**Status:** Error — {exc}"
+            return f"**Status:** Error — {exc}", ""
 
-    async def _reset_scenario() -> str:
+    async def _reset_scenario() -> tuple[str, str]:
         import httpx
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
                 resp = await client.post(f"{BACKEND_URL}/scenario/reset")
                 resp.raise_for_status()
-            return "**Status:** Nominal (reset)"
+                data = resp.json()
+            return "**Status:** Nominal (reset)", _scenario_payload_json(data, None)
         except Exception as exc:
-            return f"**Status:** Error — {exc}"
+            return f"**Status:** Error — {exc}", ""
+
+    async def _load_active_scenario() -> str:
+        """Fetched on page load so a refresh restores the scenario timeline."""
+        import httpx
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                resp = await client.get(f"{BACKEND_URL}/scenario/active")
+                resp.raise_for_status()
+                data = resp.json()
+            sid = data.get("scenario_id")
+            return _scenario_payload_json(data, sid)
+        except Exception:
+            return ""
 
     start_btn.click(
         fn=_start_scenario,
         inputs=[scenario_dropdown],
-        outputs=[status_label],
+        outputs=[status_label, scenario_state],
     )
     reset_btn.click(
         fn=_reset_scenario,
         inputs=[],
-        outputs=[status_label],
+        outputs=[status_label, scenario_state],
     )
+    demo.load(fn=_load_active_scenario, inputs=[], outputs=[scenario_state])
 
     # ── Replay speed: load current value + push UI changes to backend ──────
     async def _load_speed() -> float:
