@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Sequence
 
 from selene.agent.agent import ReasoningAgent
 from selene.agent.types import Event
@@ -24,7 +24,7 @@ _EventHandler = Callable[[Event], Awaitable[None]]
 
 async def run_pipeline(
     telemetry_source: TelemetrySource,
-    detectors: list[AnomalyDetector],
+    detectors: Sequence[AnomalyDetector],
     agent: ReasoningAgent,
     event_handler: _EventHandler,
     window_size: timedelta = timedelta(hours=1),

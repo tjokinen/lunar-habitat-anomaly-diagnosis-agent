@@ -43,6 +43,7 @@ strict_optional = true
 [tool.poetry.scripts]
 selene-replay = "selene.cli.replay:main"
 selene-serve = "selene.cli.serve:main"
+selene-run = "selene.cli.run:main"
 
 [build-system]
 requires = ["poetry-core"]
