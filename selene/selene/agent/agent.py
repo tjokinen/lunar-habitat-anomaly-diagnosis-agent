@@ -219,10 +219,18 @@ class ReasoningAgent:
         messages = self._initial_messages(trigger)
         last_turn_was_tool_free = False
 
+        valid_kb_ids = sorted(self.kb.keys())
+
         for _ in range(self.max_iterations):
+            # Once the model has attempted a Diagnosis (last_turn_was_tool_free=True),
+            # strip tools from the request entirely.  vLLM does not reliably honour
+            # response_format=json_object when tools are also present — the model can
+            # still emit tool calls, which resets last_turn_was_tool_free and breaks
+            # the retry loop.  With no tools in the prompt, the model is forced to
+            # write prose / JSON only.
             response = await self._client.complete(
                 messages=messages,
-                tools=TOOL_SCHEMAS,
+                tools=None if last_turn_was_tool_free else TOOL_SCHEMAS,
                 force_json=last_turn_was_tool_free,
             )
 
@@ -244,9 +252,15 @@ class ReasoningAgent:
                     {
                         "role": "user",
                         "content": (
-                            "Your previous response did not match the Diagnosis "
-                            f"schema. Errors: {e}. Reply with JSON only — no prose, "
-                            "no markdown fences."
+                            "Your previous response did not match the Diagnosis schema.\n"
+                            f"Errors: {e}\n\n"
+                            "Reply with a single JSON object and nothing else — no prose, "
+                            "no markdown fences, no triple backticks.\n"
+                            "Required top-level keys: primary_hypothesis (str), "
+                            "confidence (float 0-1), matched_failure_modes (list[str]), "
+                            "supporting_evidence (list[str]), recommended_actions (list[str]), "
+                            "citations (list of objects with keys: source_type, identifier, title).\n"
+                            f"Valid matched_failure_modes IDs: {valid_kb_ids}"
                         ),
                     }
                 )
@@ -264,7 +278,8 @@ class ReasoningAgent:
                         "role": "user",
                         "content": (
                             f"matched_failure_modes contains unknown KB IDs: "
-                            f"{unknown}. Use only IDs returned by lookup_failure_mode."
+                            f"{unknown}. Valid IDs are: {valid_kb_ids}. "
+                            "Use only IDs returned by lookup_failure_mode."
                         ),
                     }
                 )
