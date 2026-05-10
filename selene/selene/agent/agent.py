@@ -100,7 +100,10 @@ class _OpenAICompatClient:
         kwargs: dict[str, Any] = {"model": self._model, "messages": messages}
         if tools:
             kwargs["tools"] = tools
-            kwargs["tool_choice"] = "auto"
+            # vLLM requires --enable-auto-tool-choice server flag for "auto";
+            # omitting tool_choice lets the server use its default (same behaviour).
+            if not os.environ.get("SELENE_LLM_NO_TOOL_CHOICE"):
+                kwargs["tool_choice"] = "auto"
         if force_json:
             kwargs["response_format"] = {"type": "json_object"}
 

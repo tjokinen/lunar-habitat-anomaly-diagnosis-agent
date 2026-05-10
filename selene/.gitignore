@@ -51,4 +51,5 @@ dmypy.json
 
 # OS
 .DS_Store
+.env
 .env.local

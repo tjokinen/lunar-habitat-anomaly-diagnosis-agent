@@ -2,3 +2,4 @@ PLAN.md
 .claude
 .vscode
 __pycache__
+.env
