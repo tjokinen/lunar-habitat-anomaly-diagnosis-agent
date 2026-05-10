@@ -32,7 +32,7 @@ secondary_signature:
 typical_onset: gradual over weeks to years; decay rate accelerates as mechanical damage at the leak site progresses
 distinguishing_features:
   - decay rate of the loop pressure accelerates over time rather than decaying linearly
-  - representative telemetry progression: pressure → loop quantity → flow control valve position → downstream temperatures (consistent with expected closed-loop thermal control behavior under progressive coolant loss; NASA sources directly cite pressure and inventory decay, the valve and temperature stages are engineering inferences)
+  - "representative telemetry progression: pressure → loop quantity → flow control valve position → downstream temperatures (consistent with expected closed-loop thermal control behavior under progressive coolant loss; NASA sources directly cite pressure and inventory decay, the valve and temperature stages are engineering inferences)"
   - leak is not localized by any single sensor; it is inferred from system-level mass-balance drift
   - working fluid (ammonia on EATCS) is not directly measured — only its bulk-state proxies are
 differential_diagnosis:
