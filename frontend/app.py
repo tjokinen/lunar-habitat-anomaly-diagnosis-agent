@@ -309,18 +309,214 @@ _HABITAT_JS = """
 }
 """
 
-_DATA_PANEL_PLACEHOLDER = """
-<div class="selene-panel">
+_DATA_PANEL_HTML = """
+<div class="selene-panel" id="selene-data-panel">
   <div class="clock-bar">
     <span class="lunar-time" id="lunar-clock">--:--:--</span>
-    <span class="comm-window">Earth comm window: —</span>
+    <span class="comm-window" id="comm-window-label">Next pass: —</span>
   </div>
   <table class="sensor-table" id="sensor-table">
-    <tr><td colspan="3" style="color:#404040;font-size:12px;padding:20px 8px;">
-      Waiting for telemetry…
-    </td></tr>
+    <thead>
+      <tr>
+        <th style="width:52%;text-align:left;font-size:9px;color:#525252;font-weight:400;padding:0 8px 4px;letter-spacing:.06em;">SENSOR</th>
+        <th style="width:26%;text-align:right;font-size:9px;color:#525252;font-weight:400;padding:0 4px 4px;letter-spacing:.06em;">VALUE</th>
+        <th style="width:22%;text-align:right;font-size:9px;color:#525252;font-weight:400;padding:0 8px 4px;letter-spacing:.06em;">TREND</th>
+      </tr>
+    </thead>
+    <tbody id="sensor-rows">
+      <tr><td colspan="3" style="color:#404040;font-size:12px;padding:20px 8px;">
+        Waiting for telemetry…
+      </td></tr>
+    </tbody>
   </table>
 </div>
+"""
+
+_DATA_PANEL_JS = r"""
+() => {
+  if (window._seleneDataPanelInit) return;
+  window._seleneDataPanelInit = true;
+
+  // ── Sensors to display ────────────────────────────────────────────────────
+  const SENSORS = [
+    { id: 'tcs/temp-ams_1',       label: 'TCS Temp AMS-1',     unit: '°C'   },
+    { id: 'tcs/temp-ams_2',       label: 'TCS Temp AMS-2',     unit: '°C'   },
+    { id: 'tcs/pressure-ams',     label: 'TCS Pressure AMS',   unit: 'bar'  },
+    { id: 'tcs/rh-ams_1',         label: 'TCS Humidity AMS-1', unit: '%'    },
+    { id: 'ams-feg/co2-1',        label: 'CO₂ FEG',            unit: 'ppm'  },
+    { id: 'ams-ses/co2-1',        label: 'CO₂ SES',            unit: 'ppm'  },
+    { id: 'ams-feg/o2-1',         label: 'O₂ FEG',             unit: '%'    },
+    { id: 'nds/level-tank1',      label: 'Nutrient Tank 1',    unit: 'cm'   },
+    { id: 'nds/level-tank2',      label: 'Nutrient Tank 2',    unit: 'cm'   },
+    { id: 'nds/volume-tank1',     label: 'NDS Volume 1',       unit: 'L'    },
+    { id: 'ics/par-1',            label: 'ICS PAR-1',          unit: 'µmol' },
+  ];
+
+  // sparkline history: sensorId → [value, ...]  (max 60 points = 5-min cadence × 5 h)
+  const HISTORY_LEN = 60;
+  const history = {};
+  const sensorStatus = {};  // sensorId → 'nominal'|'warning'|'anomaly'
+  SENSORS.forEach(s => { history[s.id] = []; sensorStatus[s.id] = 'nominal'; });
+
+  // ── Lunar clock ────────────────────────────────────────────────────────────
+  // Drive from telemetry timestamps; fall back to wall clock offset.
+  let lastTelemetryTs = null;
+  let lastWallMs = Date.now();
+
+  function fmtTime(isoOrDate) {
+    const d = typeof isoOrDate === 'string' ? new Date(isoOrDate) : isoOrDate;
+    if (isNaN(d)) return '--:--:--';
+    return d.toISOString().substring(11, 19);
+  }
+
+  function tickClock() {
+    const clockEl = document.getElementById('lunar-clock');
+    if (!clockEl) return;
+    if (lastTelemetryTs) {
+      const elapsed = Date.now() - lastWallMs;
+      const d = new Date(new Date(lastTelemetryTs).getTime() + elapsed);
+      clockEl.textContent = fmtTime(d);
+    }
+  }
+  setInterval(tickClock, 1000);
+
+  // ── Comm window (simple: cycles every 2h, 10-min window) ──────────────────
+  function updateCommWindow() {
+    const el = document.getElementById('comm-window-label');
+    if (!el) return;
+    const now = Date.now();
+    const CYCLE_MS = 2 * 3600 * 1000, WINDOW_MS = 10 * 60 * 1000;
+    const phase = now % CYCLE_MS;
+    if (phase < WINDOW_MS) {
+      const rem = Math.ceil((WINDOW_MS - phase) / 60000);
+      el.textContent = 'Comm window open — ' + rem + 'm left';
+      el.style.color = '#22c55e';
+    } else {
+      const next = Math.ceil((CYCLE_MS - phase) / 60000);
+      const h = Math.floor(next / 60), m = next % 60;
+      el.textContent = 'Next pass: ' + (h ? h + 'h ' : '') + m + 'm';
+      el.style.color = '';
+    }
+  }
+  setInterval(updateCommWindow, 15000);
+  updateCommWindow();
+
+  // ── Sparkline ─────────────────────────────────────────────────────────────
+  function drawSparkline(canvas, values) {
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+    if (values.length < 2) return;
+
+    const min = Math.min(...values), max = Math.max(...values);
+    const range = max - min || 1;
+
+    ctx.beginPath();
+    ctx.strokeStyle = '#3b82f6';
+    ctx.lineWidth = 1.5;
+    values.forEach((v, i) => {
+      const x = (i / (values.length - 1)) * W;
+      const y = H - ((v - min) / range) * (H - 2) - 1;
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  }
+
+  // ── Build / update sensor rows ─────────────────────────────────────────────
+  let rowsBuilt = false;
+
+  function buildRows() {
+    const tbody = document.getElementById('sensor-rows');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    SENSORS.forEach(s => {
+      const tr = document.createElement('tr');
+      tr.id = 'row-' + s.id.replace(/\//g, '-').replace(/_/g, '-');
+      tr.innerHTML = `
+        <td style="padding:5px 8px;">
+          <span class="dot dot-nominal" id="dot-${s.id.replace(/\//g,'-').replace(/_/g,'-')}"></span>
+          <span class="sensor-name">${s.label}</span>
+        </td>
+        <td style="padding:5px 4px;text-align:right;">
+          <span class="sensor-value" id="val-${s.id.replace(/\//g,'-').replace(/_/g,'-')}">—</span>
+          <span class="sensor-unit">${s.unit}</span>
+        </td>
+        <td style="padding:3px 8px 3px 4px;text-align:right;vertical-align:middle;">
+          <canvas id="spk-${s.id.replace(/\//g,'-').replace(/_/g,'-')}"
+                  width="72" height="22"
+                  style="display:inline-block;vertical-align:middle;"></canvas>
+        </td>`;
+      tbody.appendChild(tr);
+    });
+    rowsBuilt = true;
+  }
+
+  function safeId(sensorId) { return sensorId.replace(/\//g,'-').replace(/_/g,'-'); }
+
+  function updateRow(sensorId, value) {
+    if (!rowsBuilt) buildRows();
+    const sid = safeId(sensorId);
+    const valEl = document.getElementById('val-' + sid);
+    if (valEl) valEl.textContent = typeof value === 'number' ? value.toFixed(2) : value;
+
+    const hist = history[sensorId];
+    if (hist) {
+      hist.push(value);
+      if (hist.length > HISTORY_LEN) hist.shift();
+      const canvas = document.getElementById('spk-' + sid);
+      if (canvas) drawSparkline(canvas, hist);
+    }
+  }
+
+  function setRowStatus(sensorId, status) {
+    sensorStatus[sensorId] = status;
+    const sid = safeId(sensorId);
+    const dot = document.getElementById('dot-' + sid);
+    if (!dot) return;
+    dot.className = 'dot dot-' + status;
+  }
+
+  // ── Telemetry event handler ────────────────────────────────────────────────
+  window.addEventListener('selene:telemetry', (e) => {
+    const frame = e.detail;
+    if (!frame) return;
+
+    // Update clock
+    if (frame.timestamp) {
+      lastTelemetryTs = frame.timestamp;
+      lastWallMs = Date.now();
+      const clockEl = document.getElementById('lunar-clock');
+      if (clockEl) clockEl.textContent = fmtTime(frame.timestamp);
+    }
+
+    if (!rowsBuilt) buildRows();
+
+    // Update each displayed sensor
+    const readings = frame.readings || {};
+    SENSORS.forEach(s => {
+      const r = readings[s.id];
+      if (r !== undefined && r !== null) updateRow(s.id, r);
+    });
+  });
+
+  // ── Agent event → sensor status ───────────────────────────────────────────
+  window.addEventListener('selene:agent_event', (e) => {
+    const ev = e.detail; if (!ev) return;
+    if (ev.affected_sensors) {
+      ev.affected_sensors.forEach(sid => setRowStatus(sid, 'warning'));
+    }
+    if (ev.type === 'agent_run_completed' && ev.diagnosis) {
+      (ev.diagnosis.affected_sensors || []).forEach(sid => setRowStatus(sid, 'anomaly'));
+    }
+  });
+
+  // Build rows immediately so the panel isn't blank.
+  function waitAndBuild() {
+    if (document.getElementById('sensor-rows')) { buildRows(); return; }
+    setTimeout(waitAndBuild, 200);
+  }
+  waitAndBuild();
+}
 """
 
 _INVESTIGATION_PLACEHOLDER = """
@@ -434,7 +630,7 @@ with gr.Blocks(title="Selene") as demo:
         # Right column — live data panel + investigation trace
         with gr.Column(scale=2):
             data_panel = gr.HTML(
-                value=_DATA_PANEL_PLACEHOLDER,
+                value=_DATA_PANEL_HTML,
                 elem_id="data-panel",
             )
             investigation_panel = gr.HTML(
@@ -464,6 +660,7 @@ with gr.Blocks(title="Selene") as demo:
     # ── Attach MutationObserver + Three.js habitat on page load ───────────
     demo.load(fn=None, js=_OBSERVER_JS)
     demo.load(fn=None, js=_HABITAT_JS)
+    demo.load(fn=None, js=_DATA_PANEL_JS)
 
     # ── WebSocket event pump — streams backend events into event_state ─────
     demo.load(fn=_event_stream, outputs=[event_state])
