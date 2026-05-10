@@ -1,0 +1,93 @@
+/* ── Selene dark theme ── */
+:root {
+  --background-fill-primary:    #0a0a0a;
+  --background-fill-secondary:  #141414;
+  --background-fill-tertiary:   #1a1a1a;
+  --body-text-color:            #d4d4d4;
+  --body-text-color-subdued:    #737373;
+  --border-color-primary:       #262626;
+  --border-color-accent:        #404040;
+  --color-accent:               #3b82f6;
+  --color-accent-soft:          #1e3a5f;
+  --color-warning:              #f59e0b;
+  --color-error:                #ef4444;
+  --color-nominal:              #22c55e;
+  --block-background-fill:      #141414;
+  --block-border-color:         #262626;
+  --block-label-background-fill: #1a1a1a;
+  --block-label-text-color:     #737373;
+  --block-title-text-color:     #d4d4d4;
+  --input-background-fill:      #1a1a1a;
+  --button-primary-background-fill:        #1d4ed8;
+  --button-primary-background-fill-hover:  #2563eb;
+  --button-primary-text-color:             #ffffff;
+  --button-secondary-background-fill:      #262626;
+  --button-secondary-background-fill-hover:#404040;
+  --button-secondary-text-color:           #d4d4d4;
+  --shadow-drop:                none;
+  --shadow-drop-lg:             none;
+}
+
+/* Hide Gradio chrome */
+footer { display: none !important; }
+.gradio-container > .main > .wrap > .md { display: none; }
+
+/* Panel base */
+.selene-panel {
+  background: var(--background-fill-secondary);
+  border: 1px solid var(--border-color-primary);
+  border-radius: 4px;
+  padding: 12px;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', ui-monospace, monospace;
+  color: var(--body-text-color);
+  min-height: 200px;
+}
+
+/* Sensor value table */
+.sensor-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.sensor-table tr { border-bottom: 1px solid #1f1f1f; }
+.sensor-table td { padding: 5px 8px; }
+.sensor-table .sensor-name { color: #737373; text-transform: uppercase; letter-spacing: 0.05em; font-size: 10px; }
+.sensor-table .sensor-value { text-align: right; font-size: 15px; font-weight: 600; color: #f5f5f5; }
+.sensor-table .sensor-unit  { text-align: right; color: #525252; font-size: 10px; padding-left: 4px; }
+
+/* Status dots */
+.dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; }
+.dot-nominal  { background: var(--color-nominal); }
+.dot-warning  { background: var(--color-warning); }
+.dot-anomaly  { background: var(--color-error);  animation: pulse-dot 1s infinite; }
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.3; }
+}
+
+/* Investigation trace */
+.trace-header  { font-size: 11px; color: #737373; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px; }
+.tool-call     { background: #0f172a; border-left: 2px solid #3b82f6; padding: 6px 10px; margin: 4px 0; font-size: 11px; border-radius: 0 3px 3px 0; }
+.tool-call .tc-name { color: #60a5fa; font-weight: 600; }
+.tool-call .tc-args { color: #94a3b8; margin-left: 8px; }
+.tool-call .tc-result{ color: #4ade80; margin-left: 8px; }
+
+.hypothesis-bar { display: flex; align-items: center; gap: 8px; margin: 3px 0; font-size: 11px; }
+.hypothesis-bar .hb-label { flex: 1; color: #d4d4d4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hypothesis-bar .hb-track { flex: 2; background: #1f1f1f; border-radius: 2px; height: 6px; }
+.hypothesis-bar .hb-fill  { height: 6px; background: #3b82f6; border-radius: 2px; transition: width 0.4s ease; }
+.hypothesis-bar .hb-pct   { width: 36px; text-align: right; color: #737373; }
+
+.diagnosis-card { background: #0c1a2e; border: 1px solid #1e3a5f; border-radius: 4px; padding: 12px; margin-top: 8px; }
+.diagnosis-card .dc-title { font-size: 14px; font-weight: 700; color: #f0f9ff; margin-bottom: 6px; }
+.diagnosis-card .dc-conf  { color: #60a5fa; font-size: 12px; margin-bottom: 8px; }
+.diagnosis-card .dc-section { font-size: 10px; color: #475569; text-transform: uppercase; letter-spacing: 0.08em; margin: 8px 0 3px; }
+.diagnosis-card li { font-size: 12px; color: #cbd5e1; margin: 2px 0 2px 12px; }
+.citation { font-size: 10px; color: #475569; margin: 2px 0 2px 12px; }
+.citation a { color: #3b82f6; text-decoration: none; }
+
+/* Clock bar */
+.clock-bar { display: flex; justify-content: space-between; align-items: center;
+             border-bottom: 1px solid #1f1f1f; padding-bottom: 8px; margin-bottom: 10px; }
+.lunar-time { font-size: 22px; font-weight: 700; letter-spacing: 0.05em; color: #f5f5f5; }
+.comm-window{ font-size: 11px; color: #737373; }
+
+/* Scenario controls row */
+.controls-row { display: flex; gap: 8px; align-items: center; padding: 8px 0; }
