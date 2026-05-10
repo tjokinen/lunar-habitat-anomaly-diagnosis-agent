@@ -15,6 +15,7 @@ httpx = "*"
 fastapi = "*"
 uvicorn = "*"
 websockets = "*"
+stumpy = "*"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "*"
