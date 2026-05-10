@@ -1,5 +1,5 @@
-"""Selene — Lunar Habitat Anomaly Diagnosis
-Gradio frontend for the Selene pipeline.
+"""LHADA — Lunar Habitat Anomaly Diagnosis Agent
+Gradio frontend for the LHADA pipeline.
 
 Deployment topology
 -------------------
@@ -1011,6 +1011,11 @@ _OBSERVER_JS = """
 
     // 1. Poll the textarea value — most robust across Gradio versions, since
     //    Gradio sets .value programmatically (no native input event fires).
+    //    Poll fast (20ms) because the streaming generator can write multiple
+    //    events to the textbox within a single 100ms window — at 100ms we
+    //    were dropping ~25% of agent events when investigations completed
+    //    back-to-back, leaving runs stuck as 'failed' even though their
+    //    completion event existed in the stream.
     let lastVal = '';
     setInterval(() => {
       if (ta.value !== lastVal) {
@@ -1018,7 +1023,7 @@ _OBSERVER_JS = """
         mutCount++;
         dispatch(ta.value);
       }
-    }, 100);
+    }, 20);
 
     // 2. Belt-and-suspenders: also watch for DOM mutations (in case Gradio
     //    re-renders the textarea node).
@@ -1063,7 +1068,7 @@ _OBSERVER_JS = """
 # UI layout
 # ---------------------------------------------------------------------------
 
-with gr.Blocks(title="Selene") as demo:
+with gr.Blocks(title="LHADA — Lunar Habitat Anomaly Diagnosis Agent") as demo:
 
     # ── Main two-column layout ──────────────────────────────────────────────
     with gr.Row():

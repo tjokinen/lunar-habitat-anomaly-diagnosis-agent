@@ -1,4 +1,4 @@
-"""Selene — Lunar Habitat Anomaly Diagnosis (offline public demo).
+"""LHADA — Lunar Habitat Anomaly Diagnosis Agent (offline public demo).
 
 Self-contained Gradio app for Hugging Face Spaces deployment. Replays a
 pre-recorded scenario run from ``demo_recordings/thermal_loop_coolant_leak.json``
@@ -135,11 +135,23 @@ async def _replay_events() -> AsyncGenerator[str, None]:
         yield ""
         return
 
+    # Minimum gap between yields. Multiple events in the recording often share
+    # a wall-time within ~1 ms (e.g. an `agent_run_completed` immediately
+    # followed by the next `agent_run_started`), and the browser-side observer
+    # polls the hidden textbox at 20 ms intervals. Without this floor, two
+    # back-to-back yields can overwrite the textbox before the observer reads
+    # it, dropping the earlier event — typically the completion, leaving runs
+    # stuck as 'failed' in the trace panel.
+    _MIN_GAP = 0.05
+
     loop = asyncio.get_running_loop()
     base = loop.time()
     leading = float(events[0]["t"])
+    last_emit = 0.0
     for seq, ev in enumerate(events, start=1):
         target = base + (float(ev["t"]) - leading)
+        # Apply both the original-cadence target AND the minimum-gap floor.
+        target = max(target, last_emit + _MIN_GAP)
         delay = target - loop.time()
         if delay > 0:
             await asyncio.sleep(delay)
@@ -147,6 +159,7 @@ async def _replay_events() -> AsyncGenerator[str, None]:
             payload = {"type": "telemetry", "frame": ev["data"], "_seq": seq}
         else:
             payload = {"type": "agent_event", "event": ev["data"], "_seq": seq}
+        last_emit = loop.time()
         yield json.dumps(payload)
 
 
@@ -198,7 +211,7 @@ against a curated NASA-NTRS-cited failure-mode knowledge base — replayed
 verbatim here.  Press **Start demo** to play.
 """
 
-with gr.Blocks(title="Selene — Public Demo") as demo:
+with gr.Blocks(title="LHADA — Lunar Habitat Anomaly Diagnosis Agent (Public Demo)") as demo:
 
     with gr.Row():
 
