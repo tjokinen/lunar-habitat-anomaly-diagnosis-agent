@@ -98,7 +98,10 @@ def _build_detectors(replayer: EdenIssReplayer) -> list:
     if config_path.exists():
         detectors.append(ThresholdDetector.from_yaml(config_path, metadata=meta))
 
-    # DAMP detector on TCS pressure and temperature sensors
+    # DAMP detector on TCS pressure and temperature sensors.
+    # window_length=12 (1 hour at 5-min cadence) requires at least 2*12=24 frames
+    # before stumpy can compute a matrix profile — see run_pipeline call below
+    # which uses window_size=timedelta(hours=2) to provide those 24 frames.
     tcs_sensors = [
         sid for sid, info in meta.sensors.items()
         if info.get("subsystem") == "TCS" and info.get("sensor_type") in ("P", "T")
@@ -107,7 +110,9 @@ def _build_detectors(replayer: EdenIssReplayer) -> list:
         detectors.append(DampDetector(
             sensor_ids=tcs_sensors[:6],   # keep it manageable; top 6 TCS P/T sensors
             window_length=12,             # 1 hour at 5-min cadence
-            threshold=2.0,
+            threshold=1.0,               # was 2.0; lowered because pressure baseline is
+                                         # exactly constant (0 variance), so drifting
+                                         # subsequences score in the 1-3 range
         ))
 
     return detectors
@@ -159,6 +164,9 @@ async def _run_pipeline_task(
             detectors=detectors,
             agent=agent,
             event_handler=_event_handler,
+            # DAMP with window_length=12 needs 2*12=24 frames minimum. At 5-min
+            # cadence, 2 hours = 24 frames — exactly the required minimum.
+            window_size=timedelta(hours=2),
         )
     except asyncio.CancelledError:
         logger.info("Pipeline task cancelled")
