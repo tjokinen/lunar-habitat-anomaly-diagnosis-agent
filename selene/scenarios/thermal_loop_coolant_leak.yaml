@@ -1,0 +1,26 @@
+module_type: thermal_loop_coolant_leak
+name: thermal_loop_coolant_leak
+description: >
+  ISS-inspired slow coolant leak signature on the AMS branch of the EDEN ISS
+  Thermal Control System. Pressure decays sub-threshold for the first hour
+  then accelerates; coupled inlet/outlet temperatures drift upward after the
+  controller's compensation lag; the loop valve opens stepwise as the
+  controller reacts. Reproduces the *signature pattern* of the ISS P1 EATCS
+  ammonia leak (NTRS 20190029027, NTRS 20220003097) — not its physics.
+affected_sensors:
+  pressure: tcs/pressure-ams
+  temperatures:
+    - tcs/temp-ams_in
+    - tcs/temp-ams_out
+  # NOTE: EDEN ISS TCS has no power sensors. Valve opening % is the
+  # control-loop response proxy and matches the KB entry's
+  # ``thermal_loop_valve_position`` secondary signature.
+  valve: tcs/valve-ams
+start_time: "2020-06-01T02:00:00+00:00"
+duration: 28800           # 8 hours
+initial_pressure_drop_rate: 0.005   # ~0.5% loss in the first hour
+acceleration_factor: 1.5
+temperature_lag_seconds: 1800       # 30 min controller lag
+temperature_coupling_k: 50.0        # °C per unit fractional pressure loss
+valve_step_thresholds: [0.01, 0.02, 0.04, 0.06]
+valve_step_increments: [5.0, 10.0, 20.0, 30.0]
