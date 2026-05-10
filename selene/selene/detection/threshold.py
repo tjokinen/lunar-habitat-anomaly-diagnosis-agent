@@ -18,15 +18,36 @@ class ThresholdDetector:
     Score = how far outside the range the value is, normalised by range width.
     A value exactly at the boundary scores 0; one range-width outside scores 1.
 
+    Two filters keep noise out of the pipeline:
+
+    - ``min_score`` (default 1.0): only emit when the value is at least one
+      range-width past the boundary.  Marginal excursions that don't clear
+      this bar are ignored.
+    - ``consecutive_frames`` (default 3): only emit when the *last* N frames
+      of the window are *all* out of range.  Single-frame transients are
+      ignored.  At one event-per-evaluate, we never spam the queue from a
+      stuck-at-zero sensor.
+
     Args:
         ranges: Mapping of sensor_id -> (min, max).  Sensors absent from this
             dict are silently skipped.
+        min_score: Minimum normalised score required to emit. Default 1.0.
+        consecutive_frames: Required number of consecutive out-of-range frames
+            at the tail of the window.  Default 3 (≈15 min at 5-min cadence).
     """
 
     name = "threshold"
 
-    def __init__(self, ranges: dict[str, tuple[float, float]]) -> None:
+    def __init__(
+        self,
+        ranges: dict[str, tuple[float, float]],
+        *,
+        min_score: float = 1.0,
+        consecutive_frames: int = 3,
+    ) -> None:
         self._ranges = ranges
+        self._min_score = min_score
+        self._consecutive_frames = max(1, consecutive_frames)
 
     # ------------------------------------------------------------------
     # Factory
@@ -37,6 +58,9 @@ class ThresholdDetector:
         cls,
         config_path: str | Path,
         metadata: SensorMetadata | None = None,
+        *,
+        min_score: float = 1.0,
+        consecutive_frames: int = 3,
     ) -> "ThresholdDetector":
         """Build a ThresholdDetector from a YAML range config.
 
@@ -76,7 +100,7 @@ class ThresholdDetector:
             for sensor_id, (lo, hi) in sensor_overrides.items():
                 ranges[sensor_id] = (float(lo), float(hi))
 
-        return cls(ranges)
+        return cls(ranges, min_score=min_score, consecutive_frames=consecutive_frames)
 
     # ------------------------------------------------------------------
     # AnomalyDetector protocol
@@ -84,36 +108,52 @@ class ThresholdDetector:
 
     async def evaluate(self, window: TelemetryWindow) -> list[AnomalyEvent]:
         events: list[AnomalyEvent] = []
+        n = self._consecutive_frames
+        if len(window.frames) < n:
+            return events
 
-        for frame in window.frames:
-            for sensor_id, (lo, hi) in self._ranges.items():
-                reading = frame.readings.get(sensor_id)
+        recent = window.frames[-n:]
+        latest = recent[-1]
+
+        for sensor_id, (lo, hi) in self._ranges.items():
+            range_width = hi - lo if hi != lo else 1.0
+
+            # Require all N tail frames to be present and out-of-range.
+            scores: list[float] = []
+            for f in recent:
+                reading = f.readings.get(sensor_id)
                 if reading is None:
-                    continue
-
-                value = reading.value
-                range_width = hi - lo if hi != lo else 1.0
-
-                if value < lo:
-                    score = (lo - value) / range_width
-                elif value > hi:
-                    score = (value - hi) / range_width
+                    scores = []
+                    break
+                v = reading.value
+                if v < lo:
+                    scores.append((lo - v) / range_width)
+                elif v > hi:
+                    scores.append((v - hi) / range_width)
                 else:
-                    continue
+                    scores = []
+                    break
+            if not scores:
+                continue
 
-                events.append(
-                    AnomalyEvent(
-                        detector_name=self.name,
-                        timestamp=frame.timestamp,
-                        affected_sensors=[sensor_id],
-                        score=score,
-                        details={
-                            "value": value,
-                            "range_min": lo,
-                            "range_max": hi,
-                            "unit": reading.unit,
-                        },
-                    )
+            score = max(scores)
+            if score < self._min_score:
+                continue
+
+            latest_reading = latest.readings[sensor_id]
+            events.append(
+                AnomalyEvent(
+                    detector_name=self.name,
+                    timestamp=latest.timestamp,
+                    affected_sensors=[sensor_id],
+                    score=score,
+                    details={
+                        "value": latest_reading.value,
+                        "range_min": lo,
+                        "range_max": hi,
+                        "unit": latest_reading.unit,
+                    },
                 )
+            )
 
         return events

@@ -39,44 +39,51 @@ def _make_meta(sensor_id: str, sensor_type: str, unit: str = "") -> SensorMetada
     )
 
 
+_OPEN = {"min_score": 0.0, "consecutive_frames": 1}
+
+
 class TestThresholdDetectorDirect:
     def test_no_events_when_all_in_range(self):
-        det = ThresholdDetector({"s": (0.0, 10.0)})
+        det = ThresholdDetector({"s": (0.0, 10.0)}, **_OPEN)
         window = _make_window("s", [1.0, 5.0, 9.9], unit="bar")
         events = asyncio.run(det.evaluate(window))
         assert events == []
 
     def test_event_when_exceeds_max(self):
-        det = ThresholdDetector({"s": (0.0, 10.0)})
+        det = ThresholdDetector({"s": (0.0, 10.0)}, **_OPEN)
         window = _make_window("s", [5.0, 12.0], unit="bar")
         events = asyncio.run(det.evaluate(window))
+        # Only the latest frame produces an event (one-per-evaluate).
         assert len(events) == 1
         assert events[0].affected_sensors == ["s"]
         assert events[0].detector_name == "threshold"
 
     def test_event_when_below_min(self):
-        det = ThresholdDetector({"s": (0.0, 10.0)})
-        window = _make_window("s", [-3.0, 5.0], unit="bar")
+        det = ThresholdDetector({"s": (0.0, 10.0)}, **_OPEN)
+        window = _make_window("s", [-3.0, -3.0], unit="bar")
         events = asyncio.run(det.evaluate(window))
         assert len(events) == 1
         assert events[0].score == pytest.approx(0.3)
 
     def test_score_normalized_by_range_width(self):
         # range [0, 100], value = 110 → score = 10/100 = 0.1
-        det = ThresholdDetector({"s": (0.0, 100.0)})
+        det = ThresholdDetector({"s": (0.0, 100.0)}, **_OPEN)
         window = _make_window("s", [110.0], unit="ppm")
         events = asyncio.run(det.evaluate(window))
         assert len(events) == 1
         assert events[0].score == pytest.approx(0.1)
 
-    def test_multiple_violations_in_window(self):
-        det = ThresholdDetector({"s": (0.0, 10.0)})
-        window = _make_window("s", [11.0, 5.0, 12.0, 13.0], unit="bar")
+    def test_one_event_per_evaluate(self):
+        """Even when every frame is out of range, only one event fires."""
+        det = ThresholdDetector({"s": (0.0, 10.0)}, **_OPEN)
+        window = _make_window("s", [11.0, 12.0, 13.0, 14.0], unit="bar")
         events = asyncio.run(det.evaluate(window))
-        assert len(events) == 3
+        assert len(events) == 1
+        # Score reflects the worst frame in the inspected tail.
+        assert events[0].score == pytest.approx(0.4)
 
     def test_details_populated(self):
-        det = ThresholdDetector({"s": (0.0, 10.0)})
+        det = ThresholdDetector({"s": (0.0, 10.0)}, **_OPEN)
         window = _make_window("s", [15.0], unit="bar")
         events = asyncio.run(det.evaluate(window))
         d = events[0].details
@@ -85,17 +92,74 @@ class TestThresholdDetectorDirect:
         assert d["range_max"] == 10.0
 
     def test_sensor_absent_from_ranges_skipped(self):
-        det = ThresholdDetector({"other": (0.0, 10.0)})
+        det = ThresholdDetector({"other": (0.0, 10.0)}, **_OPEN)
         window = _make_window("s", [999.0], unit="bar")
         events = asyncio.run(det.evaluate(window))
         assert events == []
 
     def test_sensor_not_in_frame_skipped(self):
-        det = ThresholdDetector({"s": (0.0, 10.0)})
+        det = ThresholdDetector({"s": (0.0, 10.0)}, **_OPEN)
         # frame has "other", not "s"
         reading = SensorReading(sensor_id="other", timestamp=_T0, value=999.0, unit="bar")
         frame = TelemetryFrame(timestamp=_T0, readings={"other": reading})
         window = TelemetryWindow(frames=[frame], start=_T0, end=_T0)
+        events = asyncio.run(det.evaluate(window))
+        assert events == []
+
+
+class TestThresholdDetectorGating:
+    def test_min_score_suppresses_marginal_excursions(self):
+        # range [0, 10], value 11 → score 0.1; min_score=1.0 → no event.
+        det = ThresholdDetector({"s": (0.0, 10.0)}, min_score=1.0, consecutive_frames=1)
+        window = _make_window("s", [11.0], unit="bar")
+        events = asyncio.run(det.evaluate(window))
+        assert events == []
+
+    def test_min_score_at_boundary_emits(self):
+        # value 20 in [0,10] → score 1.0; min_score=1.0 → emits.
+        det = ThresholdDetector({"s": (0.0, 10.0)}, min_score=1.0, consecutive_frames=1)
+        window = _make_window("s", [20.0], unit="bar")
+        events = asyncio.run(det.evaluate(window))
+        assert len(events) == 1
+
+    def test_consecutive_frames_requires_full_streak(self):
+        det = ThresholdDetector({"s": (0.0, 10.0)}, min_score=0.0, consecutive_frames=3)
+        # 2-frame streak — insufficient.
+        window = _make_window("s", [5.0, 99.0, 99.0], unit="bar")
+        events = asyncio.run(det.evaluate(window))
+        assert events == []
+
+    def test_consecutive_frames_streak_emits_once(self):
+        det = ThresholdDetector({"s": (0.0, 10.0)}, min_score=0.0, consecutive_frames=3)
+        window = _make_window("s", [99.0, 99.0, 99.0], unit="bar")
+        events = asyncio.run(det.evaluate(window))
+        assert len(events) == 1
+
+    def test_window_shorter_than_streak_emits_nothing(self):
+        det = ThresholdDetector({"s": (0.0, 10.0)}, min_score=0.0, consecutive_frames=3)
+        window = _make_window("s", [99.0, 99.0], unit="bar")
+        events = asyncio.run(det.evaluate(window))
+        assert events == []
+
+    def test_missing_reading_breaks_streak(self):
+        det = ThresholdDetector({"s": (0.0, 10.0)}, min_score=0.0, consecutive_frames=3)
+        # 3rd-from-last frame is missing the sensor reading entirely.
+        from datetime import timedelta as _td
+        ts0 = _T0
+        f0 = TelemetryFrame(timestamp=ts0, readings={})
+        f1 = TelemetryFrame(
+            timestamp=ts0 + _td(minutes=5),
+            readings={"s": SensorReading(
+                sensor_id="s", timestamp=ts0 + _td(minutes=5), value=99.0, unit="bar"
+            )},
+        )
+        f2 = TelemetryFrame(
+            timestamp=ts0 + _td(minutes=10),
+            readings={"s": SensorReading(
+                sensor_id="s", timestamp=ts0 + _td(minutes=10), value=99.0, unit="bar"
+            )},
+        )
+        window = TelemetryWindow(frames=[f0, f1, f2], start=f0.timestamp, end=f2.timestamp)
         events = asyncio.run(det.evaluate(window))
         assert events == []
 
@@ -126,7 +190,9 @@ class TestThresholdDetectorFromYaml:
 
     def test_value_outside_yaml_range_triggers_event(self):
         meta = _make_meta("tcs/pressure-ams", "P", "bar")
-        det = ThresholdDetector.from_yaml(CONFIG_YAML, metadata=meta)
+        det = ThresholdDetector.from_yaml(
+            CONFIG_YAML, metadata=meta, min_score=0.0, consecutive_frames=1
+        )
         # Override max is 3.5; inject value of 5.0
         window = _make_window("tcs/pressure-ams", [5.0], unit="bar")
         events = asyncio.run(det.evaluate(window))

@@ -219,6 +219,59 @@ class TestRunPipeline:
         tcs_anomalies = [a for a in anomalies if "tcs/pressure-ams" in a.affected_sensors]
         assert len(tcs_anomalies) == 1
 
+    def test_high_score_investigated_before_low_score(self):
+        """With workers=1, the queue must serve the highest-score trigger first
+        even if a lower-score trigger was enqueued earlier in the same frame."""
+        replayer, store, agent, kb, _ = self._setup()
+
+        # Two detectors that fire on the same frame; the second produces a
+        # much higher score than the first.
+        class _FixedDetector:
+            def __init__(self, name: str, score: float, sensor: str) -> None:
+                self.name = name
+                self._score = score
+                self._sensor = sensor
+                self._fired = False
+
+            async def evaluate(self, window):
+                if self._fired or not window.frames:
+                    return []
+                self._fired = True
+                return [AnomalyEvent(
+                    detector_name=self.name,
+                    timestamp=window.frames[-1].timestamp,
+                    affected_sensors=[self._sensor],
+                    score=self._score,
+                    details={},
+                )]
+
+        order: list[str] = []
+
+        async def _fake_investigate(trigger, emit):
+            order.append(trigger.detector_name)
+            return None
+
+        agent.investigate = _fake_investigate  # type: ignore[method-assign]
+
+        # Low-score detector listed first (would win FIFO); high-score second.
+        detectors = [
+            _FixedDetector("low", 0.5, "tcs/pressure-ams"),
+            _FixedDetector("high", 5.0, "tcs/pressure-ams"),
+        ]
+
+        async def handler(event: Event) -> None:
+            return None
+
+        asyncio.run(run_pipeline(
+            telemetry_source=replayer,
+            detectors=detectors,  # type: ignore[arg-type]
+            agent=agent,
+            event_handler=handler,
+            max_concurrent_investigations=1,  # serial → ordering is observable
+        ))
+
+        assert order == ["high", "low"]
+
 
 # ---------------------------------------------------------------------------
 # CLI integration test
