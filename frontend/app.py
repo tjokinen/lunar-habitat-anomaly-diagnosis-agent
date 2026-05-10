@@ -519,14 +519,262 @@ _DATA_PANEL_JS = r"""
 }
 """
 
-_INVESTIGATION_PLACEHOLDER = """
-<div class="selene-panel">
+_INVESTIGATION_HTML = """
+<div class="selene-panel" id="selene-inv-panel" style="min-height:280px;">
   <div class="trace-header">Investigation trace</div>
-  <div id="trace-idle" style="color:#404040;font-size:12px;padding:16px 0;">
-    Monitoring nominal — no active investigation.
+
+  <!-- idle state -->
+  <div id="inv-idle">
+    <div id="inv-idle-pulse" style="display:flex;align-items:center;gap:8px;color:#404040;font-size:12px;padding:8px 0 12px;">
+      <span class="dot dot-nominal" style="animation:pulse-dot 2s infinite;"></span>
+      Monitoring nominal — no active investigation.
+    </div>
+    <div id="inv-detector-log" style="font-size:10px;color:#525252;font-family:monospace;max-height:120px;overflow-y:auto;"></div>
   </div>
-  <div id="trace-active" style="display:none;"></div>
+
+  <!-- active investigation state (hidden until agent fires) -->
+  <div id="inv-active" style="display:none;">
+    <div id="inv-header" style="margin-bottom:8px;"></div>
+    <div id="inv-tool-log" style="max-height:160px;overflow-y:auto;margin-bottom:8px;"></div>
+    <div id="inv-hypotheses" style="margin-bottom:8px;"></div>
+    <div id="inv-diagnosis" style="display:none;"></div>
+  </div>
 </div>
+"""
+
+_INVESTIGATION_JS = r"""
+() => {
+  if (window._seleneInvInit) return;
+  window._seleneInvInit = true;
+
+  // per-run state
+  let activeRunId   = null;
+  let runStartTs    = null;
+  const toolCalls   = {};   // call_id → { name, args, startTs, result, error }
+  const hypotheses  = [];   // [{ id, confidence }]
+  const detectorLog = [];   // last N anomaly lines
+
+  // ── helpers ────────────────────────────────────────────────────────────────
+  function el(id) { return document.getElementById(id); }
+
+  function elapsed(ts) {
+    if (!runStartTs || !ts) return '';
+    const dt = Math.round((new Date(ts) - new Date(runStartTs)) / 1000);
+    const m = Math.floor(dt / 60), s = dt % 60;
+    return '[+' + (m ? m + ':' + String(s).padStart(2,'0') : s + 's') + ']';
+  }
+
+  function esc(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  function shortArgs(args) {
+    try {
+      const s = JSON.stringify(args);
+      return s.length > 80 ? s.slice(0, 77) + '…' : s;
+    } catch { return '{}'; }
+  }
+
+  // ── detector log (idle state) ─────────────────────────────────────────────
+  function pushDetectorLog(line) {
+    detectorLog.push(line);
+    if (detectorLog.length > 8) detectorLog.shift();
+    const logEl = el('inv-detector-log');
+    if (!logEl) return;
+    logEl.innerHTML = detectorLog.map(l =>
+      '<div style="padding:1px 0;border-bottom:1px solid #1a1a1a;">' + esc(l) + '</div>'
+    ).join('');
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  // ── show/hide states ──────────────────────────────────────────────────────
+  function showIdle() {
+    const a = el('inv-active'), i = el('inv-idle');
+    if (a) a.style.display = 'none';
+    if (i) i.style.display = '';
+  }
+  function showActive() {
+    const a = el('inv-active'), i = el('inv-idle');
+    if (a) a.style.display = '';
+    if (i) i.style.display = 'none';
+  }
+
+  // ── render tool log ───────────────────────────────────────────────────────
+  function renderToolLog() {
+    const logEl = el('inv-tool-log');
+    if (!logEl) return;
+    logEl.innerHTML = Object.values(toolCalls).map(tc => {
+      const done    = tc.result !== undefined || tc.error;
+      const result  = tc.error
+        ? '<span style="color:#ef4444;">error: ' + esc(tc.error) + '</span>'
+        : tc.result
+          ? '<span style="color:#4ade80;">' + esc(tc.result) + '</span>'
+          : '<span style="color:#525252;">…</span>';
+      return `
+        <div class="tool-call">
+          <span style="color:#475569;margin-right:6px;">${esc(elapsed(tc.startTs))}</span>
+          <span class="tc-name">${esc(tc.name)}</span>
+          <span class="tc-args">${esc(shortArgs(tc.args))}</span>
+          ${done ? '<span class="tc-result"> → ' + result + '</span>' : ''}
+        </div>`;
+    }).join('');
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  // ── render hypothesis ladder ──────────────────────────────────────────────
+  function renderHypotheses() {
+    const el2 = el('inv-hypotheses');
+    if (!el2 || hypotheses.length === 0) return;
+    el2.innerHTML = '<div class="trace-header" style="margin-bottom:4px;">Hypotheses</div>' +
+      hypotheses.map(h => {
+        const pct = Math.round(h.confidence * 100);
+        return `
+          <div class="hypothesis-bar">
+            <span class="hb-label" title="${esc(h.id)}">${esc(h.id)}</span>
+            <span class="hb-track"><span class="hb-fill" style="width:${pct}%;"></span></span>
+            <span class="hb-pct">${pct}%</span>
+          </div>`;
+      }).join('');
+  }
+
+  // ── render diagnosis card ─────────────────────────────────────────────────
+  function renderDiagnosis(diag) {
+    const cardEl = el('inv-diagnosis');
+    if (!cardEl) return;
+    const conf = Math.round((diag.confidence || 0) * 100);
+    const fmtList = (arr) => (arr || []).map(x =>
+      '<li>' + esc(x) + '</li>'
+    ).join('');
+    const fmtCitations = (arr) => (arr || []).map((c, i) =>
+      `<div class="citation">[${i+1}] ${esc(c.title || c.id || '')}` +
+      (c.url ? ` — <a href="${esc(c.url)}" target="_blank">${esc(c.url)}</a>` : '') +
+      '</div>'
+    ).join('');
+
+    cardEl.innerHTML = `
+      <div class="diagnosis-card">
+        <div class="dc-title">${esc(diag.primary_hypothesis)}</div>
+        <div class="dc-conf">
+          Confidence: ${conf}%
+          <span style="display:inline-block;width:80px;height:5px;background:#1f1f1f;border-radius:2px;margin-left:8px;vertical-align:middle;">
+            <span style="display:block;height:5px;width:${conf}%;background:${conf>=70?'#22c55e':conf>=40?'#f59e0b':'#ef4444'};border-radius:2px;"></span>
+          </span>
+        </div>
+        ${diag.matched_failure_modes && diag.matched_failure_modes.length ? `
+          <div class="dc-section">Matched failure modes</div>
+          <ul>${fmtList(diag.matched_failure_modes)}</ul>` : ''}
+        ${diag.supporting_evidence && diag.supporting_evidence.length ? `
+          <div class="dc-section">Supporting evidence</div>
+          <ul>${fmtList(diag.supporting_evidence)}</ul>` : ''}
+        ${diag.recommended_actions && diag.recommended_actions.length ? `
+          <div class="dc-section">Recommended actions</div>
+          <ul>${fmtList(diag.recommended_actions)}</ul>` : ''}
+        ${diag.citations && diag.citations.length ? `
+          <div class="dc-section">References</div>
+          ${fmtCitations(diag.citations)}` : ''}
+      </div>`;
+    cardEl.style.display = '';
+  }
+
+  // ── event dispatch ────────────────────────────────────────────────────────
+  window.addEventListener('selene:agent_event', (e) => {
+    const ev = e.detail;
+    if (!ev || !ev.type) return;
+
+    if (ev.type === 'agent_run_started') {
+      // Reset state for new run
+      activeRunId = ev.run_id;
+      runStartTs  = ev.timestamp;
+      Object.keys(toolCalls).forEach(k => delete toolCalls[k]);
+      hypotheses.length = 0;
+      const hdr = el('inv-header');
+      if (hdr) {
+        const trig = ev.trigger || {};
+        const sensors = (trig.affected_sensors || []).join(', ') || '—';
+        const score   = trig.score != null ? (trig.score * 100).toFixed(0) + '%' : '';
+        hdr.innerHTML = `
+          <div style="font-size:12px;color:#f59e0b;margin-bottom:4px;">
+            <span class="dot dot-warning" style="animation:pulse-dot 1s infinite;"></span>
+            Investigation in progress
+          </div>
+          <div style="font-size:10px;color:#737373;">
+            Trigger: <span style="color:#d4d4d4;">${esc(sensors)}</span>
+            ${score ? ' · score <span style="color:#d4d4d4;">' + score + '</span>' : ''}
+            · detector <span style="color:#d4d4d4;">${esc(trig.detector_name||'')}</span>
+          </div>`;
+      }
+      const diagEl = el('inv-diagnosis');
+      if (diagEl) diagEl.style.display = 'none';
+      showActive();
+    }
+
+    if (ev.type === 'tool_call_started') {
+      toolCalls[ev.call_id] = { name: ev.tool_name, args: ev.arguments, startTs: ev.timestamp };
+      renderToolLog();
+    }
+
+    if (ev.type === 'tool_call_completed') {
+      const tc = toolCalls[ev.call_id] || {};
+      tc.result = ev.result_summary;
+      tc.error  = ev.error || null;
+      toolCalls[ev.call_id] = tc;
+      renderToolLog();
+    }
+
+    if (ev.type === 'hypothesis_ladder_updated') {
+      hypotheses.length = 0;
+      (ev.ranked || []).forEach(([id, conf]) => hypotheses.push({ id, confidence: conf }));
+      renderHypotheses();
+    }
+
+    if (ev.type === 'agent_run_completed') {
+      // Swap header to completed style
+      const hdr = el('inv-header');
+      if (hdr) {
+        const existing = hdr.querySelector('div');
+        if (existing) {
+          existing.innerHTML = `<span class="dot dot-nominal"></span>Investigation complete`;
+          existing.style.color = '#22c55e';
+        }
+      }
+      renderDiagnosis(ev.diagnosis || {});
+    }
+
+    if (ev.type === 'agent_run_failed') {
+      const hdr = el('inv-header');
+      if (hdr) {
+        const existing = hdr.querySelector('div');
+        if (existing) {
+          existing.innerHTML = `<span class="dot dot-anomaly"></span>Investigation failed: ${esc(ev.reason)}`;
+          existing.style.color = '#ef4444';
+        }
+      }
+    }
+  });
+
+  // ── AnomalyEvent feeds idle detector log ─────────────────────────────────
+  window.addEventListener('selene:telemetry', (e) => {
+    // no-op here — just need the handler registered
+  });
+
+  // Feed anomaly events into detector log while idle
+  const origObs = window._seleneObserverPatched;
+  if (!origObs) {
+    window._seleneObserverPatched = true;
+    // We can't directly listen to AnomalyEvents since they come via the
+    // event_state pump as type="telemetry" frames. Instead watch for
+    // selene:agent_event with trigger info to populate the log.
+    window.addEventListener('selene:agent_event', (e) => {
+      const ev = e.detail;
+      if (ev && ev.type === 'agent_run_started' && ev.trigger) {
+        const t = ev.trigger;
+        const sensors = (t.affected_sensors || []).join(', ');
+        const ts = t.timestamp ? new Date(t.timestamp).toISOString().substring(11,19) : '';
+        pushDetectorLog(ts + ' ' + (t.detector_name||'detector') + ' → ' + sensors);
+      }
+    });
+  }
+}
 """
 
 # ---------------------------------------------------------------------------
@@ -634,7 +882,7 @@ with gr.Blocks(title="Selene") as demo:
                 elem_id="data-panel",
             )
             investigation_panel = gr.HTML(
-                value=_INVESTIGATION_PLACEHOLDER,
+                value=_INVESTIGATION_HTML,
                 elem_id="investigation-panel",
             )
 
@@ -661,6 +909,7 @@ with gr.Blocks(title="Selene") as demo:
     demo.load(fn=None, js=_OBSERVER_JS)
     demo.load(fn=None, js=_HABITAT_JS)
     demo.load(fn=None, js=_DATA_PANEL_JS)
+    demo.load(fn=None, js=_INVESTIGATION_JS)
 
     # ── WebSocket event pump — streams backend events into event_state ─────
     demo.load(fn=_event_stream, outputs=[event_state])
